@@ -1,0 +1,20 @@
+Vesicle — Proprietary and Confidential
+
+Copyright (c) 2026 Katsuhide Tsuruta. All rights reserved.
+
+Vesicle is the commercial layer of the StromaDB platform. This repository and
+its contents are proprietary and confidential. No license or right is granted to
+any person or entity to use, copy, modify, merge, publish, distribute,
+sublicense, or sell any part of this software, in whole or in part, except under
+a separate written agreement with the copyright holder. The source is published
+for reference and transparency only; publication does not grant any license.
+
+The open, source-available StromaDB core is licensed separately under the
+Elastic License 2.0. That license applies to the StromaDB repository only and
+does NOT apply to this repository.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE
+OF THIS SOFTWARE.
