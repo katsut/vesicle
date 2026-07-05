@@ -1,0 +1,37 @@
+{
+  "label": "Library (books & loans)",
+  "schema": "CREATE TABLE authors (\n    id   INT PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE genres (\n    id   INT PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE books (\n    id        INT PRIMARY KEY,\n    title     TEXT NOT NULL,\n    author_id INT REFERENCES authors(id)\n);\n\nCREATE TABLE book_genres (\n    book_id  INT REFERENCES books(id),\n    genre_id INT REFERENCES genres(id),\n    PRIMARY KEY (book_id, genre_id)\n);\n\nCREATE TABLE members (\n    id   INT PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE loans (\n    id         INT PRIMARY KEY,\n    member_id  INT REFERENCES members(id),\n    book_id    INT REFERENCES books(id),\n    loaned_on  DATE,   -- valid-time start\n    due_on     DATE,   -- edge property\n    returned_on DATE   -- valid-time end (NULL = still out)\n);",
+  "data": {
+    "authors": [
+      {"id": 1, "name": "Ursula K. Le Guin"},
+      {"id": 2, "name": "Italo Calvino"},
+      {"id": 3, "name": "Toni Morrison"}
+    ],
+    "genres": [
+      {"id": 1, "name": "Science Fiction"},
+      {"id": 2, "name": "Literary"},
+      {"id": 3, "name": "Fantasy"}
+    ],
+    "books": [
+      {"id": 1, "title": "The Left Hand of Darkness", "author_id": 1},
+      {"id": 2, "title": "A Wizard of Earthsea", "author_id": 1},
+      {"id": 3, "title": "Invisible Cities", "author_id": 2},
+      {"id": 4, "title": "Beloved", "author_id": 3}
+    ],
+    "book_genres": [
+      {"book_id": 1, "genre_id": 1}, {"book_id": 1, "genre_id": 2},
+      {"book_id": 2, "genre_id": 3}, {"book_id": 3, "genre_id": 2},
+      {"book_id": 4, "genre_id": 2}
+    ],
+    "members": [
+      {"id": 1, "name": "Alice"},
+      {"id": 2, "name": "Bob"},
+      {"id": 3, "name": "Carol"}
+    ],
+    "loans": [
+      {"id": 1, "member_id": 1, "book_id": 1, "loaned_on": "2025-05-01", "due_on": "2025-05-15", "returned_on": null},
+      {"id": 2, "member_id": 2, "book_id": 3, "loaned_on": "2025-04-10", "due_on": "2025-04-24", "returned_on": "2025-04-20"},
+      {"id": 3, "member_id": 1, "book_id": 4, "loaned_on": "2025-05-03", "due_on": "2025-05-17", "returned_on": null}
+    ]
+  }
+}

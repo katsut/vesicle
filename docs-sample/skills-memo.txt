@@ -1,0 +1,11 @@
+Skills snapshot (informal)
+
+A few notes for staffing the ML Recommender work:
+
+- Alice is our strongest Python engineer and also does a lot of ML.
+- Carol is excellent at ML — probably the deepest on the team — though her Python is
+  only so-so.
+- Frank knows Python and some ML, and has picked up DevOps.
+- Bob is solid on Python and SQL.
+
+For anything ML-heavy, Alice and Carol are the go-to people.

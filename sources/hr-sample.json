@@ -1,0 +1,331 @@
+{
+  "label": "HR / projects (sample)",
+  "schema": "CREATE TABLE departments (\n    id   INT PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE employees (\n    id            INT PRIMARY KEY,\n    name          TEXT NOT NULL,\n    department_id INT REFERENCES departments(id),\n    manager_id    INT REFERENCES employees(id)   -- self-ref: org hierarchy\n);\n\nCREATE TABLE projects (\n    id       INT PRIMARY KEY,\n    name     TEXT NOT NULL,\n    priority TEXT,        -- low | medium | high\n    status   TEXT         -- planned | active | done\n);\n\nCREATE TABLE assignments (\n    id          INT PRIMARY KEY,\n    employee_id INT REFERENCES employees(id),\n    project_id  INT REFERENCES projects(id),\n    role        TEXT,       -- edge property\n    allocation  INT,        -- edge property (percent)\n    start_date  DATE,       -- valid-time start\n    end_date    DATE        -- valid-time end (NULL = current)\n);\n\nCREATE TABLE skills (\n    id   INT PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE employee_skills (\n    employee_id INT REFERENCES employees(id),\n    skill_id    INT REFERENCES skills(id),\n    level       INT,        -- 1..5 (edge property)\n    PRIMARY KEY (employee_id, skill_id)\n);\n\nCREATE TABLE project_skills (\n    project_id INT REFERENCES projects(id),\n    skill_id   INT REFERENCES skills(id),\n    PRIMARY KEY (project_id, skill_id)\n);\n\nCREATE TABLE documents (\n    id                 INT PRIMARY KEY,\n    title              TEXT NOT NULL,\n    body               TEXT,\n    author_employee_id INT REFERENCES employees(id)\n);",
+  "data": {
+    "departments": [
+      {
+        "id": 1,
+        "name": "Engineering"
+      },
+      {
+        "id": 2,
+        "name": "Data"
+      },
+      {
+        "id": 3,
+        "name": "Sales"
+      }
+    ],
+    "employees": [
+      {
+        "id": 1,
+        "name": "Alice",
+        "department_id": 1,
+        "manager_id": null
+      },
+      {
+        "id": 2,
+        "name": "Bob",
+        "department_id": 1,
+        "manager_id": 1
+      },
+      {
+        "id": 3,
+        "name": "Carol",
+        "department_id": 2,
+        "manager_id": null
+      },
+      {
+        "id": 4,
+        "name": "Dave",
+        "department_id": 1,
+        "manager_id": 1
+      },
+      {
+        "id": 5,
+        "name": "Eve",
+        "department_id": 2,
+        "manager_id": 3
+      },
+      {
+        "id": 6,
+        "name": "Frank",
+        "department_id": 2,
+        "manager_id": 3
+      },
+      {
+        "id": 7,
+        "name": "Grace",
+        "department_id": 3,
+        "manager_id": null
+      },
+      {
+        "id": 8,
+        "name": "Heidi",
+        "department_id": 3,
+        "manager_id": 7
+      },
+      {
+        "id": 9,
+        "name": "Ivan",
+        "department_id": 1,
+        "manager_id": 1
+      },
+      {
+        "id": 10,
+        "name": "Judy",
+        "department_id": 2,
+        "manager_id": 3
+      }
+    ],
+    "projects": [
+      {
+        "id": 1,
+        "name": "Billing Revamp",
+        "priority": "medium",
+        "status": "active"
+      },
+      {
+        "id": 2,
+        "name": "Infra Migration",
+        "priority": "high",
+        "status": "active"
+      },
+      {
+        "id": 3,
+        "name": "ML Recommender",
+        "priority": "high",
+        "status": "planned"
+      }
+    ],
+    "skills": [
+      {
+        "id": 1,
+        "name": "Python"
+      },
+      {
+        "id": 2,
+        "name": "ML"
+      },
+      {
+        "id": 3,
+        "name": "SQL"
+      },
+      {
+        "id": 4,
+        "name": "Rust"
+      },
+      {
+        "id": 5,
+        "name": "Design"
+      },
+      {
+        "id": 6,
+        "name": "PM"
+      },
+      {
+        "id": 7,
+        "name": "Sales"
+      },
+      {
+        "id": 8,
+        "name": "DevOps"
+      }
+    ],
+    "employee_skills": [
+      {
+        "employee_id": 1,
+        "skill_id": 1,
+        "level": 5
+      },
+      {
+        "employee_id": 1,
+        "skill_id": 2,
+        "level": 4
+      },
+      {
+        "employee_id": 1,
+        "skill_id": 3,
+        "level": 3
+      },
+      {
+        "employee_id": 2,
+        "skill_id": 1,
+        "level": 3
+      },
+      {
+        "employee_id": 2,
+        "skill_id": 3,
+        "level": 4
+      },
+      {
+        "employee_id": 3,
+        "skill_id": 2,
+        "level": 5
+      },
+      {
+        "employee_id": 3,
+        "skill_id": 1,
+        "level": 2
+      },
+      {
+        "employee_id": 4,
+        "skill_id": 4,
+        "level": 5
+      },
+      {
+        "employee_id": 4,
+        "skill_id": 8,
+        "level": 4
+      },
+      {
+        "employee_id": 5,
+        "skill_id": 5,
+        "level": 5
+      },
+      {
+        "employee_id": 6,
+        "skill_id": 1,
+        "level": 4
+      },
+      {
+        "employee_id": 6,
+        "skill_id": 2,
+        "level": 3
+      },
+      {
+        "employee_id": 6,
+        "skill_id": 8,
+        "level": 3
+      },
+      {
+        "employee_id": 7,
+        "skill_id": 6,
+        "level": 5
+      },
+      {
+        "employee_id": 7,
+        "skill_id": 7,
+        "level": 3
+      },
+      {
+        "employee_id": 8,
+        "skill_id": 7,
+        "level": 5
+      },
+      {
+        "employee_id": 9,
+        "skill_id": 3,
+        "level": 5
+      },
+      {
+        "employee_id": 9,
+        "skill_id": 1,
+        "level": 3
+      },
+      {
+        "employee_id": 10,
+        "skill_id": 2,
+        "level": 4
+      },
+      {
+        "employee_id": 10,
+        "skill_id": 3,
+        "level": 3
+      }
+    ],
+    "project_skills": [
+      {
+        "project_id": 1,
+        "skill_id": 3
+      },
+      {
+        "project_id": 1,
+        "skill_id": 6
+      },
+      {
+        "project_id": 2,
+        "skill_id": 4
+      },
+      {
+        "project_id": 2,
+        "skill_id": 8
+      },
+      {
+        "project_id": 3,
+        "skill_id": 1
+      },
+      {
+        "project_id": 3,
+        "skill_id": 2
+      }
+    ],
+    "assignments": [
+      {
+        "id": 1,
+        "employee_id": 1,
+        "project_id": 1,
+        "role": "lead",
+        "allocation": 50,
+        "start_date": "2025-01-01",
+        "end_date": null
+      },
+      {
+        "id": 2,
+        "employee_id": 2,
+        "project_id": 1,
+        "role": "dev",
+        "allocation": 80,
+        "start_date": "2025-02-01",
+        "end_date": null
+      },
+      {
+        "id": 3,
+        "employee_id": 4,
+        "project_id": 2,
+        "role": "lead",
+        "allocation": 60,
+        "start_date": "2025-01-15",
+        "end_date": null
+      },
+      {
+        "id": 4,
+        "employee_id": 6,
+        "project_id": 2,
+        "role": "dev",
+        "allocation": 40,
+        "start_date": "2025-03-01",
+        "end_date": null
+      },
+      {
+        "id": 5,
+        "employee_id": 9,
+        "project_id": 1,
+        "role": "dev",
+        "allocation": 30,
+        "start_date": "2024-06-01",
+        "end_date": "2024-12-31"
+      }
+    ],
+    "documents": [
+      {
+        "id": 1,
+        "title": "Python ML best practices",
+        "body": "A guide to Python and ML for recommenders.",
+        "author_employee_id": 1
+      },
+      {
+        "id": 2,
+        "title": "Rust infra notes",
+        "body": "DevOps and Rust migration notes.",
+        "author_employee_id": 4
+      },
+      {
+        "id": 3,
+        "title": "Sales playbook",
+        "body": "How we sell.",
+        "author_employee_id": 7
+      }
+    ]
+  }
+}

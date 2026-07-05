@@ -1,0 +1,10 @@
+ML Recommender — kickoff notes
+
+Attendees: Alice, Carol, Frank
+
+Decisions:
+- The ML Recommender project needs Python and ML skills.
+- Carol will own the modelling; Frank supports on the data side.
+- Carol now reports to Alice for this project.
+
+Open: we still need one more ML-strong person. Alice to ask around.

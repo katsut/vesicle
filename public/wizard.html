@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vesicle authoring</title>
+<style>
+  :root {
+    /* Shared StromaDB design-system tokens — EARTH theme (warm daylight; the Stroma console is the
+       SPACE theme: same token names & component patterns, different world). */
+    --bg:#f2efe6; --bg-2:#eae5d9; --panel:#fffdf7; --panel-2:#f6f1e7;
+    --line:#e5dfd1; --line-2:#d4ccba; --fg:#211d15; --fg-dim:#574f40; --mut:#8b8371;
+    --accent:#2f9e73; --accent-2:#237a58; --accent-ink:#ffffff;
+    --r:10px; --r-sm:7px;
+    --shadow:0 1px 0 rgba(0,0,0,.02), 0 14px 30px -16px rgba(60,50,30,.22);
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+    /* earth-toned semantic tiers (ocean · soil · forest) — echo the single-accent system */
+    --sky:#2c6fa6; --sky-soft:#e6eef5; --clay:#b06a2a; --clay-soft:#f6ecdd; --leaf:#2f9e73; --leaf-soft:#e3f0e9;
+    --good:#237a58; --bad:#a23b3b;
+    /* aliases: keep existing markup working while adopting the Stroma token names above */
+    --paper:var(--bg); --ink:var(--fg); --muted:var(--fg-dim); --faint:var(--mut);
+    --hair:var(--line); --hair-strong:var(--line-2); --accent-soft:var(--leaf-soft); --accent-ink:var(--accent-2);
+    --ai:var(--sky); --ai-soft:var(--sky-soft); --amber:var(--clay); --amber-soft:var(--clay-soft);
+  }
+  /* EARTH night — the dark theme (deep forest & ocean at night). Overriding the base tokens is
+     enough; the aliases above resolve to these at use time. */
+  html[data-theme="dark"]{
+    --bg:#13181a; --bg-2:#181e20; --panel:#1d2427; --panel-2:#222a2d;
+    --line:#2b3437; --line-2:#3a4548; --fg:#e9ede9; --fg-dim:#a9b3ab; --mut:#6f7a72;
+    --accent:#40c091; --accent-2:#35a67c; --accent-ink:#eaf6f0;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 16px 34px -14px rgba(0,0,0,.62);
+    --sky:#5aa0d8; --sky-soft:#182734; --clay:#d0955a; --clay-soft:#2c2418; --leaf:#40c091; --leaf-soft:#15271e;
+    --good:#40c091; --bad:#e0707e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1320px;margin:0 auto;padding:22px clamp(14px,3vw,34px) 60px}
+  header.top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  .mark{display:inline-flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.01em;font-size:19px}
+  .mark .dot{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 34% 32%,#3fbfa2 0%,var(--accent) 46%,var(--accent-ink) 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 1px 3px rgba(14,110,92,.4)}
+  .mark small{font-weight:500;color:var(--faint);font-size:12px}
+  .tagline{color:var(--muted);font-size:13.5px;margin:2px 0 18px;max-width:70ch}
+  .tagline b{color:var(--ink);font-weight:600}
+  .app{display:grid;grid-template-columns:220px minmax(0,1fr) 400px;gap:20px;align-items:start}
+  @media (max-width:1080px){.app{grid-template-columns:1fr}}
+  .rail{position:sticky;top:18px}
+  .rail h3{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--faint);margin:0 0 10px 2px;font-weight:700}
+  .source{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+  .source .row{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+  .source .row .db{width:24px;height:24px;border-radius:6px;background:#1d2b27;color:#7fe0c6;display:grid;place-items:center;font-size:12px}
+  .source .row b{font-size:13.5px}
+  .tables{display:flex;flex-wrap:wrap;gap:6px}
+  .tbl{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--panel-2);border:1px solid var(--hair);border-radius:6px;padding:3px 7px}
+  .tbl.join{border-style:dashed;color:var(--accent-ink);background:var(--accent-soft);border-color:#bfe0d6}
+  .railnote{margin-top:14px;padding:11px 12px;background:var(--panel);border:1px solid var(--hair);border-radius:11px;font-size:12px;color:var(--muted);line-height:1.45;box-shadow:var(--shadow)}
+  .railnote b{color:var(--ink)}
+
+  .streamhead{display:flex;align-items:center;gap:10px;margin:2px 2px 12px}
+  .streamhead h2{font-size:15px;margin:0;letter-spacing:-.01em}
+  .streamhead .bar{flex:1;height:1px;background:var(--hair)}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:14px 15px;margin-bottom:12px;box-shadow:var(--shadow);position:relative}
+  .card .tier{position:absolute;top:-8px;left:14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:20px}
+  .tier.ta{background:var(--ai-soft);color:var(--ai)} .tier.tb{background:var(--amber-soft);color:var(--amber)} .tier.tc{background:var(--accent-soft);color:var(--accent-ink)}
+  .voice{display:flex;gap:10px;align-items:flex-start}
+  .avatar{flex:none;width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--ai-soft);color:var(--ai);margin-top:2px}
+  .avatar.ux{background:var(--accent-soft);color:var(--accent-ink)}
+  .say{flex:1;min-width:0}
+  .say .q{font-weight:600;font-size:14px;margin:0 0 6px}
+  .say .q code{font-family:var(--mono);font-size:12.5px;background:var(--panel-2);border:1px solid var(--hair);border-radius:5px;padding:1px 5px}
+  .why{display:flex;gap:6px;margin-top:4px;font-size:12.5px;color:var(--muted);background:var(--panel-2);border:1px solid var(--hair);border-radius:8px;padding:6px 10px;line-height:1.4}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .etype{font-size:12.5px;background:var(--ai-soft);color:var(--ai);border:1px solid #d7d3f4;border-radius:20px;padding:3px 10px;font-weight:600}
+  .etype small{color:var(--faint);font-weight:500}
+  .opts{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+  button.opt{font:inherit;font-size:13px;cursor:pointer;border:1.5px solid var(--hair-strong);background:var(--panel);color:var(--ink);border-radius:9px;padding:7px 12px;transition:background .12s,border-color .12s,color .12s}
+  button.opt:hover{border-color:var(--accent);background:var(--accent-soft)}
+  button.opt.pick{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.opt.pick.neg{background:#6b7671;border-color:#6b7671}
+  .predname{font-family:var(--mono);font-size:12.5px;color:var(--accent-ink)}
+
+  .side{position:sticky;top:18px;display:flex;flex-direction:column;gap:14px}
+  .panel{background:var(--panel);border:1px solid var(--hair);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+  .tabs{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;font:600 12.5px var(--sans);letter-spacing:.02em;cursor:pointer;border:1px solid transparent;border-radius:100px;color:var(--mut);background:transparent;padding:6px 12px;transition:color .12s,background .12s,border-color .12s}
+  .tabs button:hover{color:var(--fg-dim)}
+  .tabs button.on{color:var(--accent);background:color-mix(in oklab,var(--accent) 15%,transparent);border-color:color-mix(in oklab,var(--accent) 42%,transparent)}
+  .tabpane{display:none} .tabpane.on{display:block}
+  svg.graph{display:block;width:100%;height:auto;background:radial-gradient(circle at 30% 20%,var(--panel),var(--bg-2))}
+  .mapping{margin:0;padding:13px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.55;color:var(--fg);white-space:pre;overflow:auto;max-height:360px}
+  .mapping .k{color:var(--ai)} .mapping .s{color:var(--accent-ink)} .mapping .add{background:var(--accent-soft);border-radius:3px}
+
+  .apply{padding:14px 15px}
+  .apply button.run{width:100%;font:inherit;font-weight:700;font-size:14px;cursor:pointer;border:none;border-radius:10px;padding:12px;color:#fff;background:linear-gradient(180deg,var(--accent),var(--accent-2));box-shadow:0 2px 6px rgba(11,90,73,.35)}
+  .apply button.run:disabled{opacity:.5;cursor:default}
+  .result{padding:0 15px 15px}
+  .stat{display:flex;gap:8px;font-size:12.5px;color:var(--muted);font-family:var(--mono);margin:2px 0}
+  .gaps{margin:10px 0 0;font-size:12px;color:var(--amber);background:var(--amber-soft);border:1px solid color-mix(in oklab,var(--clay) 40%,var(--line));border-radius:9px;padding:9px 11px;line-height:1.45}
+  .gaps b{color:var(--clay)}
+  .payoff .q{font-size:13px;font-weight:600;margin:12px 0 2px}
+  .payoff .qsub{color:var(--faint);font-size:11.5px;margin:0 0 10px}
+  .rank{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+  .rank li{display:flex;align-items:center;gap:10px;padding:7px 9px;border:1px solid var(--hair);border-radius:9px;background:var(--panel-2)}
+  .rank li .pos{flex:none;width:16px;text-align:center;font-weight:700;color:var(--faint);font-size:12px}
+  .rank li .who{font-weight:600;flex:1}
+  .rank li .attr{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .rank li.top{border-color:#bfe0d6;background:var(--accent-soft)}
+  .rank li.top .pos{color:var(--accent)}
+  .loading{color:var(--faint);font-size:13px;padding:20px 2px}
+  .err{color:var(--bad);font-size:13px;background:#f7ecec;border:1px solid #e6cccc;border-radius:9px;padding:10px 12px;margin:8px 0}
+  .srcedit{background:var(--panel);border:1px solid var(--hair);border-radius:12px;box-shadow:var(--shadow);margin-bottom:18px;overflow:hidden}
+  .srcedit>summary{cursor:pointer;padding:12px 15px;font-size:13px;font-weight:600;list-style:none;display:flex;gap:8px;align-items:center}
+  .srcedit>summary::-webkit-details-marker{display:none}
+  .srcedit>summary::before{content:"⚙";color:var(--faint)}
+  .srcedit .mono{font-family:var(--mono);font-size:11.5px;color:var(--faint);font-weight:500}
+  .srcbody{padding:0 15px 15px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.srcbody{grid-template-columns:1fr}}
+  .srcpick{grid-column:1/-1;display:flex;align-items:center;gap:9px}
+  .srcpick label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);font-weight:700}
+  .srcpick select{font:inherit;font-size:13px;color:var(--ink);border:1px solid var(--hair-strong);border-radius:8px;padding:5px 9px;background:var(--panel)}
+  .srccol{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .srccol label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);font-weight:700}
+  .srccol textarea{width:100%;height:200px;resize:vertical;font-family:var(--mono);font-size:11.5px;line-height:1.5;color:var(--fg);border:1px solid var(--hair-strong);border-radius:9px;padding:10px;background:#fbfcfc}
+  .srccol textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  .srcactions{grid-column:1/-1;display:flex;gap:8px;align-items:center}
+  .srcerr{color:var(--bad);font-size:12px}
+  /* topbar chrome — shared with the Stroma console (pill controls, metallic HUD buttons) */
+  header.top{align-items:center}
+  .spacer{flex:1}
+  .ctls{display:flex;align-items:center;gap:8px}
+  .ctl{background:linear-gradient(180deg,color-mix(in oklab,var(--panel) 84%,var(--fg-dim) 16%),color-mix(in oklab,var(--panel) 96%,#000 4%));border:1px solid var(--line-2);color:var(--fg-dim);border-radius:var(--r-sm);min-width:32px;height:32px;padding:0 9px;font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 2px 6px -3px rgba(0,0,0,.3);transition:color .15s,border-color .15s,filter .15s}
+  .ctl:hover{color:var(--fg);border-color:var(--accent);filter:brightness(1.05)}
+  .ctl.select{padding:0}
+  .ctl select{appearance:none;background:transparent;border:none;color:inherit;font:inherit;font-size:12.5px;padding:0 10px;height:32px;cursor:pointer}
+  .modal-bg{position:fixed;inset:0;background:color-mix(in oklab,var(--fg) 34%,transparent);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal-bg.on{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);width:min(440px,calc(100% - 32px));padding:18px 20px}
+  .modal h2{margin:0 0 4px;font-size:16px}
+  .modal .sub{color:var(--faint);font-size:12.5px;margin:0 0 16px}
+  .setrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid var(--line)}
+  .setrow:first-of-type{border-top:none}
+  .setrow label{font-size:13.5px;font-weight:600}
+  .setrow .hint{color:var(--faint);font-size:11.5px;font-weight:400}
+  .seg{display:inline-flex;background:var(--panel-2);border:1px solid var(--line);border-radius:100px;padding:2px}
+  .seg button{font:600 12px var(--sans);border:none;background:transparent;color:var(--mut);border-radius:100px;padding:5px 12px;cursor:pointer}
+  .seg button.on{background:var(--accent);color:#fff}
+  .modal .close{margin-top:16px;width:100%;font:inherit;font-weight:600;border:1px solid var(--line-2);background:var(--panel-2);color:var(--fg);border-radius:var(--r-sm);padding:9px;cursor:pointer}
+  .modal .close:hover{border-color:var(--accent)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top"><span class="mark"><span class="dot"></span>Vesicle <small>authoring</small></span>
+    <span class="spacer"></span>
+    <div class="ctls">
+      <span class="ctl select"><select id="lang" aria-label="language">
+        <option value="en">English</option><option value="ja">日本語</option><option value="zh">中文</option>
+      </select></span>
+      <button class="ctl" id="themeBtn" title="theme" aria-label="theme">☀</button>
+      <button class="ctl" id="settingsBtn" title="settings" aria-label="settings" data-i18n-title="settings">⚙</button>
+      <button class="ctl" id="logoutBtn" title="log out" data-i18n="logout"></button>
+    </div>
+  </header>
+  <p class="tagline" data-i18n="tagline"></p>
+
+  <div class="modal-bg" id="settingsModal">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2 data-i18n="settings_title"></h2>
+      <p class="sub" data-i18n="settings_sub"></p>
+      <div class="setrow">
+        <label data-i18n="set_theme"></label>
+        <div class="seg" id="themeSeg">
+          <button data-theme-val="light" data-i18n="theme_light"></button>
+          <button data-theme-val="dark" data-i18n="theme_dark"></button>
+          <button data-theme-val="auto" data-i18n="theme_auto"></button>
+        </div>
+      </div>
+      <div class="setrow">
+        <label data-i18n="set_lang"></label>
+        <div class="seg" id="langSeg">
+          <button data-lang-val="en">EN</button>
+          <button data-lang-val="ja">日本語</button>
+          <button data-lang-val="zh">中文</button>
+        </div>
+      </div>
+      <div class="setrow">
+        <div><label data-i18n="set_stroma"></label><br><span class="hint" id="stromaStatus">…</span></div>
+      </div>
+      <button class="close" id="settingsClose" data-i18n="close"></button>
+    </div>
+  </div>
+
+  <details class="srcedit" id="srcedit">
+    <summary><span data-i18n="edit_source"></span> <span class="mono" id="src-tag"></span></summary>
+    <div class="srcbody">
+      <div class="srcpick">
+        <label data-i18n="source_label"></label>
+        <select id="sourcePick"></select>
+      </div>
+      <div class="srccol">
+        <label data-i18n="schema_label"></label>
+        <textarea id="ta-schema" spellcheck="false"></textarea>
+      </div>
+      <div class="srccol">
+        <label data-i18n="data_label"></label>
+        <textarea id="ta-data" spellcheck="false"></textarea>
+      </div>
+      <div class="srcactions">
+        <button class="opt" id="src-use" data-i18n="use_source"></button>
+        <button class="opt" id="src-reset" data-i18n="reset_source"></button>
+        <span class="srcerr" id="src-err"></span>
+      </div>
+    </div>
+  </details>
+
+  <div class="app">
+    <nav class="rail">
+      <h3 data-i18n="source">Source</h3>
+      <div class="source">
+        <div class="row"><span class="db">▤</span><b id="src-name">…</b></div>
+        <div class="tables" id="src-tables"></div>
+      </div>
+      <div class="railnote"><span data-i18n="who_decides"></span>
+        <button class="opt" id="repropose" data-i18n="repropose" style="margin-top:10px;font-size:12px;padding:5px 10px"></button></div>
+    </nav>
+
+    <main>
+      <div class="streamhead"><h2 data-i18n="proposal_head"></h2><div class="bar"></div></div>
+      <div id="proposal"><div class="loading" data-i18n="loading"></div></div>
+    </main>
+
+    <aside class="side">
+      <div class="panel">
+        <div class="tabs"><button class="on" data-tab="graph" data-i18n="graph_tab">Graph</button><button data-tab="map" data-i18n="mapping_tab">Mapping</button></div>
+        <div class="tabpane on" data-pane="graph"><svg class="graph" id="graph" viewBox="0 0 400 320" role="img" aria-label="proposed graph"></svg></div>
+        <div class="tabpane" data-pane="map"><pre class="mapping" id="mapping"></pre></div>
+      </div>
+      <div class="panel">
+        <div class="apply"><button class="run" id="run" data-i18n="apply" disabled></button></div>
+        <div class="result" id="result"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script type="module">
+const $ = (s, r=document) => r.querySelector(s);
+const el = (t, c, h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
+
+// --- i18n (EN / JA / ZH) ---
+const I18N = {
+  en: {
+    tagline: "A domain expert confirms the graph — <b>Vesicle reads your database and proposes the structure</b>; you confirm the meaning in plain language, then load it live. This proposal is produced by the model from your real schema.",
+    source: "Source", who_decides: "<b>Who decides what.</b> Vesicle fixes the <i>structure</i> that makes queries work (types &amp; relationships) and asks <i>you</i>, in business terms, about cardinality and which details to keep.",
+    repropose: "Re-propose", proposal_head: "Vesicle's proposal", loading: "Reading the schema and proposing an ontology…",
+    graph_tab: "Graph", mapping_tab: "Mapping", apply: "Apply &amp; load into StromaDB", applying: "Loading into StromaDB…",
+    src_name: "{n} tables · PostgreSQL", tier_decided: "Vesicle decided", tier_yourcall: "Your call", tier_keep: "Keep this?",
+    entity_intro: "I found {n} kinds of things, and made shared ones their own type so they can be matched across.",
+    confirm_head: "Confirm the connections", details_head: "Details you'd probably forget",
+    card_q: "{pred} &nbsp;links <b>{from}</b> → <b>{to}</b>. Can one {from} have several {to}?",
+    opt_many: "Yes — many", opt_one: "No — one",
+    current_history_q: "{pred} &nbsp;links <b>{from}</b> → <b>{to}</b>, and it has an end date. Do you need who's on it <b>now</b>, or the <b>full history</b>?",
+    opt_current: "Who's on it now", opt_history: "Full history",
+    current_why: "✦ “Now” lets the database answer who's currently on a project (it tracks the end date). “History” keeps every past record instead.",
+    carries: "{pred} also carries {bits}.", bit_attrs: "attributes <b>{list}</b>", bit_valid: "a valid-through date (<code>{col}</code>, empty = current)", bit_join: " and ",
+    keep_why: "◆ Keeping these lets you rank by strength and ask “who's on it now” — the things people forget to model.",
+    keep_them: "Keep them", skip_them: "Skip them",
+    ingested: "loaded → {facts} facts · {nodes} nodes", notes: "About your data:",
+    payoff_staff: "Payoff: staff “{project}”", payoff_needs: "needs {needs} · ranked strong &amp; available",
+    score_detail: "{score} = str {strength} − {busy}% busy", matches: "matches {skills}",
+    edit_source: "Configure source", source_label: "Source", schema_label: "Schema (CREATE TABLE …)", data_label: "Sample data (JSON)",
+    use_source: "Use this source & propose", reset_source: "Reset to sample",
+    gap_valid_end_as_prop: "“{pred}”: end-dates are kept on this connection, so you can still tell who's on a project now from who used to be.",
+    gap_from_not_entity: "“{pred}”: couldn't be connected — its starting thing isn't one of the graph types — so it was skipped.",
+    gap_source_unresolved: "“{pred}”: couldn't work out how to link “{src}”, so it was skipped.",
+    gap_no_fk: "“{pred}”: couldn't find how “{src}” connects the two things, so it was skipped.",
+    settings: "Settings", logout: "Log out", settings_title: "Settings", settings_sub: "Theme, language, and connection.",
+    set_theme: "Theme", theme_light: "Light", theme_dark: "Dark", theme_auto: "Auto",
+    set_lang: "Language", set_stroma: "StromaDB connection", close: "Done",
+  },
+  ja: {
+    tagline: "モデリングは素人でも、ドメインを知る人がグラフを確認できます — <b>Vesicle がデータベースを読んで構造を提案</b>し、あなたは業務の言葉で意味を確認して、そのまま投入します。この提案は実スキーマからモデルが生成しています。",
+    source: "ソース", who_decides: "<b>誰が何を決めるか。</b> Vesicle は<i>クエリが成立する構造</i>（型と関係）を自動で決め、cardinality と残す詳細を<i>あなた</i>に業務の言葉で訊きます。",
+    repropose: "再提案", proposal_head: "Vesicle の提案", loading: "スキーマを読み、オントロジーを提案中…",
+    graph_tab: "グラフ", mapping_tab: "マッピング", apply: "適用して StromaDB に投入", applying: "StromaDB に投入中…",
+    src_name: "{n} テーブル · PostgreSQL", tier_decided: "Vesicle が決定", tier_yourcall: "あなたの判断", tier_keep: "残しますか？",
+    entity_intro: "{n} 種類の「もの」を見つけ、共有されるものは独立した型にしました（横断して照合できるように）。",
+    confirm_head: "つながりを確認", details_head: "見落としがちな詳細",
+    card_q: "{pred} は <b>{from}</b> → <b>{to}</b> をつなぎます。1 つの {from} は複数の {to} を持ちますか？",
+    opt_many: "はい — 複数", opt_one: "いいえ — 1 つ",
+    current_history_q: "{pred} は <b>{from}</b> → <b>{to}</b> をつなぎ、終了日を持っています。知りたいのは「<b>今</b>つながっている相手」ですか、それとも「<b>これまでの全履歴</b>」ですか？",
+    opt_current: "今の状態", opt_history: "全履歴",
+    current_why: "✦「今」を選ぶと、データベースが「今このプロジェクトにいる人」を答えられます（終了日を見て判定）。「履歴」は過去の記録をすべて残します。",
+    carries: "{pred} は {bits} も持っています。", bit_attrs: "属性 <b>{list}</b>", bit_valid: "有効期限の日付（<code>{col}</code>・空＝現在）", bit_join: " と ",
+    keep_why: "◆ これらを残すと、強さで順位付けしたり「今この人か」を訊けます — モデル化で忘れられがちな部分です。",
+    keep_them: "残す", skip_them: "省く",
+    ingested: "取り込み → {facts} facts · {nodes} nodes", notes: "データについて:",
+    payoff_staff: "成果クエリ: 「{project}」の担当", payoff_needs: "必要: {needs} · 強さ×空き で順位付け",
+    score_detail: "{score} = 強さ {strength} − {busy}% 稼働", matches: "一致: {skills}",
+    edit_source: "ソースを設定", source_label: "ソース", schema_label: "スキーマ（CREATE TABLE …）", data_label: "サンプルデータ（JSON）",
+    use_source: "このソースで提案", reset_source: "サンプルに戻す",
+    gap_valid_end_as_prop: "「{pred}」：このつながりに終了日を残したので、「今このプロジェクトにいる人」と「過去にいた人」を区別できます。",
+    gap_from_not_entity: "「{pred}」：起点が型として扱われていないため、つなげられずスキップしました。",
+    gap_source_unresolved: "「{pred}」：「{src}」のつなぎ方が判別できず、スキップしました。",
+    gap_no_fk: "「{pred}」：「{src}」が2つをどうつなぐか見つからず、スキップしました。",
+    settings: "設定", logout: "ログアウト", settings_title: "設定", settings_sub: "テーマ・言語・接続。",
+    set_theme: "テーマ", theme_light: "ライト", theme_dark: "ダーク", theme_auto: "自動",
+    set_lang: "言語", set_stroma: "StromaDB 接続", close: "完了",
+  },
+  zh: {
+    tagline: "领域专家（无需建模）即可确认图谱 — <b>Vesicle 读取你的数据库并提出结构</b>；你用业务语言确认含义，然后实时载入。该提案由模型根据你的真实模式生成。",
+    source: "数据源", who_decides: "<b>谁决定什么。</b> Vesicle 自动确定<i>让查询成立的结构</i>（类型与关系），并就基数和保留哪些细节，用业务语言询问<i>你</i>。",
+    repropose: "重新提案", proposal_head: "Vesicle 的提案", loading: "正在读取模式并提出本体…",
+    graph_tab: "图谱", mapping_tab: "映射", apply: "应用并载入 StromaDB", applying: "正在载入 StromaDB…",
+    src_name: "{n} 张表 · PostgreSQL", tier_decided: "Vesicle 已决定", tier_yourcall: "由你决定", tier_keep: "保留吗？",
+    entity_intro: "找到 {n} 类事物，并将被共享的设为独立类型（以便跨类匹配）。",
+    confirm_head: "确认这些连接", details_head: "容易忽略的细节",
+    card_q: "{pred} 连接 <b>{from}</b> → <b>{to}</b>。一个 {from} 能有多个 {to} 吗？",
+    opt_many: "是 — 多个", opt_one: "否 — 一个",
+    current_history_q: "{pred} 连接 <b>{from}</b> → <b>{to}</b>，且带有结束日期。你想知道的是“<b>现在</b>的对象”，还是“<b>完整历史</b>”？",
+    opt_current: "当前状态", opt_history: "完整历史",
+    current_why: "✦ 选“现在”可让数据库回答“现在在项目里的人”（依据结束日期判定）；“历史”则保留所有过去记录。",
+    carries: "{pred} 还带有 {bits}。", bit_attrs: "属性 <b>{list}</b>", bit_valid: "有效截止日期（<code>{col}</code>，空＝当前）", bit_join: " 和 ",
+    keep_why: "◆ 保留这些可按强度排序并询问“现在是谁” — 都是建模时容易忘的部分。",
+    keep_them: "保留", skip_them: "跳过",
+    ingested: "已载入 → {facts} facts · {nodes} nodes", notes: "关于你的数据:",
+    payoff_staff: "成果查询: 为「{project}」配人", payoff_needs: "需要: {needs} · 按 强且有空 排序",
+    score_detail: "{score} = 强度 {strength} − {busy}% 占用", matches: "匹配: {skills}",
+    edit_source: "配置数据源", source_label: "数据源", schema_label: "模式（CREATE TABLE …）", data_label: "示例数据（JSON）",
+    use_source: "使用此数据源并提案", reset_source: "重置为示例",
+    gap_valid_end_as_prop: "「{pred}」：在这条连接上保留了结束日期，因此仍能区分“现在在项目里的人”和“过去在的人”。",
+    gap_from_not_entity: "「{pred}」：起点未作为类型处理，无法连接，已跳过。",
+    gap_source_unresolved: "「{pred}」：无法判断如何连接「{src}」，已跳过。",
+    gap_no_fk: "「{pred}」：找不到「{src}」如何连接两者，已跳过。",
+    settings: "设置", logout: "登出", settings_title: "设置", settings_sub: "主题、语言与连接。",
+    set_theme: "主题", theme_light: "浅色", theme_dark: "深色", theme_auto: "自动",
+    set_lang: "语言", set_stroma: "StromaDB 连接", close: "完成",
+  },
+};
+let LANG = "en";
+function t(k, v) {
+  let s = (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k;
+  if (v) for (const [key, val] of Object.entries(v)) s = s.replaceAll("{" + key + "}", String(val));
+  return s;
+}
+function applyLang() {
+  document.querySelectorAll("[data-i18n]").forEach((e) => { e.innerHTML = t(e.getAttribute("data-i18n")); });
+  if (PROPOSAL) { renderSource(); renderProposal(); renderMapping(); }
+}
+
+let PROPOSAL = null;   // { tables, mapping }
+const STATE = {};      // per-predicate confirm state: { [name]: { card, keepProps, keepValid } }
+let SOURCE = { schema: "", data: "" }; // the configured source (schema DDL + sample data JSON)
+
+async function loadSourceList() {
+  const j = await fetch("/api/sources").then((r) => r.json());
+  const sel = $("#sourcePick"); sel.innerHTML = "";
+  for (const s of j.sources || []) {
+    const o = document.createElement("option"); o.value = s.id; o.textContent = s.label; sel.append(o);
+  }
+}
+
+async function loadSource(id) {
+  const q = id ? `?id=${encodeURIComponent(id)}` : "";
+  const j = await fetch(`/api/source${q}`).then((r) => r.json());
+  SOURCE = { schema: j.schema || "", data: j.data || "" };
+  $("#ta-schema").value = SOURCE.schema;
+  $("#ta-data").value = SOURCE.data;
+  if (j.id) $("#sourcePick").value = j.id;
+}
+
+async function propose(fresh = false) {
+  $("#proposal").innerHTML = `<div class="loading" data-i18n="loading">${t("loading")}</div>`;
+  $("#run").disabled = true;
+  $("#result").innerHTML = "";
+  try {
+    const r = await fetch("/api/propose", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ schema: SOURCE.schema, fresh }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "propose failed");
+    PROPOSAL = j;
+    for (const p of j.mapping.predicates) STATE[p.name] = { card: p.cardinality, keepProps: true, keepValid: true };
+    renderSource(); renderProposal(); renderGraph(); renderMapping();
+    $("#run").disabled = false;
+  } catch (e) {
+    $("#proposal").innerHTML = `<div class="err">${e.message}</div>`;
+  }
+}
+
+function renderSource() {
+  const tables = PROPOSAL.tables;
+  $("#src-name").textContent = t("src_name", { n: tables.length });
+  $("#src-tag").textContent = t("src_name", { n: tables.length });
+  const box = $("#src-tables"); box.innerHTML = "";
+  for (const tb of tables) box.append(el("span", "tbl" + (tb.isJoin ? " join" : ""), tb.name));
+}
+
+function typeTable(gtype) { // reverse entity_types
+  const et = PROPOSAL.mapping.entity_types;
+  return Object.keys(et).find((k) => et[k] === gtype);
+}
+
+function renderProposal() {
+  const m = PROPOSAL.mapping, root = $("#proposal"); root.innerHTML = "";
+
+  // Tier A — entity types Vesicle decided
+  const a = el("article", "card");
+  a.append(el("span", "tier ta", t("tier_decided")));
+  const av = el("div", "voice"); av.append(el("div", "avatar", "✦"));
+  const asay = el("div", "say");
+  asay.append(el("p", "q", t("entity_intro", { n: Object.keys(m.entity_types).length })));
+  const chips = el("div", "chips");
+  for (const [tbl, gt] of Object.entries(m.entity_types)) chips.append(el("span", "etype", `${gt} <small>· ${tbl}</small>`));
+  asay.append(chips);
+  const rat = m.rationale || {};
+  for (const key of Object.keys(rat)) if (key.startsWith("type:")) asay.append(el("div", "why", `✦ ${rat[key]}`));
+  av.append(asay); a.append(av); root.append(a);
+
+  // Tier B — cardinality confirm, per predicate
+  const headB = el("div", "streamhead", `<h2>${t("confirm_head")}</h2><div class="bar"></div>`);
+  headB.style.marginTop = "20px"; root.append(headB);
+  for (const p of m.predicates) {
+    const c = el("article", "card"); c.append(el("span", "tier tb", t("tier_yourcall")));
+    const v = el("div", "voice"); v.append(el("div", "avatar", "✦"));
+    const say = el("div", "say");
+    const dated = !!p.valid_end; // an end-dated relationship → frame as "current vs history"
+    say.append(el("p", "q", t(dated ? "current_history_q" : "card_q", { pred: `<span class="predname">${p.name}</span>`, from: p.from, to: p.to })));
+    if (dated) say.append(el("div", "why", t("current_why")));
+    else if (rat[p.name]) say.append(el("div", "why", `✦ ${rat[p.name]}`));
+    const opts = el("div", "opts");
+    // "current" ⇒ one-cardinality (the engine tracks the end date, so "who's on it now" is answerable);
+    // "history" ⇒ many-cardinality (append-only past records).
+    const mk = (val, lab) => { const b = el("button", "opt" + (STATE[p.name].card===val?" pick"+(val==="one"?" neg":""):""), lab);
+      b.onclick = () => { STATE[p.name].card = val; renderProposal(); renderGraph(); renderMapping(); }; return b; };
+    if (dated) opts.append(mk("one", t("opt_current")), mk("many", t("opt_history")));
+    else opts.append(mk("many", t("opt_many")), mk("one", t("opt_one")));
+    say.append(opts); v.append(say); c.append(v); root.append(c);
+  }
+
+  // Tier C — details (edge properties / valid-time) proposed on some predicates
+  const detailPreds = m.predicates.filter((p) => (p.properties && p.properties.length) || p.valid_end);
+  if (detailPreds.length) {
+    const headC = el("div", "streamhead", `<h2>${t("details_head")}</h2><div class="bar"></div>`);
+    headC.style.marginTop = "20px"; root.append(headC);
+    for (const p of detailPreds) {
+      const c = el("article", "card"); c.append(el("span", "tier tc", t("tier_keep")));
+      const v = el("div", "voice"); v.append(el("div", "avatar ux", "◆"));
+      const say = el("div", "say");
+      const bits = [];
+      if (p.properties && p.properties.length) bits.push(t("bit_attrs", { list: p.properties.join(", ") }));
+      if (p.valid_end) bits.push(t("bit_valid", { col: p.valid_end }));
+      say.append(el("p", "q", t("carries", { pred: `<span class="predname">${p.name}</span>`, bits: bits.join(t("bit_join")) })));
+      say.append(el("div", "why", t("keep_why")));
+      const opts = el("div", "opts");
+      const on = STATE[p.name].keepProps && STATE[p.name].keepValid;
+      const keep = el("button", "opt" + (on?" pick":""), t("keep_them"));
+      keep.onclick = () => { STATE[p.name].keepProps = true; STATE[p.name].keepValid = true; renderProposal(); renderMapping(); };
+      const drop = el("button", "opt" + (!on?" pick neg":""), t("skip_them"));
+      drop.onclick = () => { STATE[p.name].keepProps = false; STATE[p.name].keepValid = false; renderProposal(); renderMapping(); };
+      opts.append(keep, drop); say.append(opts); v.append(say); c.append(v); root.append(c);
+    }
+  }
+}
+
+function confirmedMapping() {
+  const m = PROPOSAL.mapping;
+  return {
+    entity_types: m.entity_types,
+    predicates: m.predicates.map((p) => {
+      const s = STATE[p.name];
+      const out = { name: p.name, source: p.source, from: p.from, to: p.to, cardinality: s.card };
+      if (p.properties && p.properties.length && s.keepProps) out.properties = p.properties;
+      if (p.valid_end && s.keepValid) out.valid_end = p.valid_end;
+      return out;
+    }),
+  };
+}
+
+function renderGraph() {
+  const m = PROPOSAL.mapping, svg = $("#graph");
+  const types = Object.values(m.entity_types);
+  const cx = 200, cy = 160, R = 110;
+  const pos = {};
+  types.forEach((t, i) => { const a = -Math.PI/2 + i*2*Math.PI/types.length; pos[t] = [cx + R*Math.cos(a), cy + R*Math.sin(a)]; });
+  let s = "";
+  for (const p of m.predicates) {
+    const A = pos[p.from], B = pos[p.to]; if (!A || !B) continue;
+    const mx=(A[0]+B[0])/2, my=(A[1]+B[1])/2;
+    s += `<line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" stroke="#9fb3ac" stroke-width="1.4"/>`;
+    s += `<text x="${mx}" y="${my-2}" font-size="8.5" fill="#7c8d87" text-anchor="middle" font-family="system-ui">${p.name}</text>`;
+  }
+  types.forEach((t) => { const [x,y]=pos[t];
+    s += `<circle cx="${x}" cy="${y}" r="26" fill="#1d2b27"/><text x="${x}" y="${y+4}" text-anchor="middle" fill="#eafaf4" font-size="10.5" font-family="system-ui">${t}</text>`;
+  });
+  svg.innerHTML = s;
+}
+
+function renderMapping() {
+  const m = confirmedMapping(), L = [];
+  L.push("{"); L.push('  <span class="k">"entity_types"</span>: {');
+  L.push(Object.entries(m.entity_types).map(([k,v]) => `    "${k}": "<span class="s">${v}</span>"`).join(",\n"));
+  L.push("  },"); L.push('  <span class="k">"predicates"</span>: [');
+  L.push(m.predicates.map((p) => {
+    let x = `    { "name": "${p.name}", "from": "<span class="s">${p.from}</span>", "to": "<span class="s">${p.to}</span>", "card": "${p.cardinality}"`;
+    if (p.properties) x += `, <span class="add">"props": [${p.properties.map(q=>`"${q}"`).join(", ")}]</span>`;
+    if (p.valid_end) x += `, <span class="add">"valid_end": "${p.valid_end}"</span>`;
+    return x + " }";
+  }).join(",\n"));
+  L.push("  ]"); L.push("}");
+  $("#mapping").innerHTML = L.join("\n");
+}
+
+async function apply() {
+  $("#run").disabled = true; $("#run").innerHTML = t("applying");
+  $("#result").innerHTML = "";
+  try {
+    const r = await fetch("/api/apply", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ mapping: confirmedMapping(), schema: SOURCE.schema, data: SOURCE.data }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "apply failed");
+    renderResult(j);
+  } catch (e) {
+    $("#result").innerHTML = `<div class="err">${e.message}</div>`;
+  } finally {
+    $("#run").disabled = false; $("#run").innerHTML = t("apply");
+  }
+}
+
+function renderResult(j) {
+  const root = $("#result"); root.innerHTML = "";
+  const st = j.stats || {};
+  root.append(el("div", "stat", t("ingested", { facts: st.facts||0, nodes: st.nodes||0, head: st.durable_head||0 })));
+  if (j.gaps && j.gaps.length) {
+    const line = (g) => {
+      if (typeof g === "string") return g; // legacy string gap
+      const key = "gap_" + g.code;
+      return (I18N[LANG] && I18N[LANG][key]) ? t(key, g.params) : g.text;
+    };
+    root.append(el("div", "gaps", `<b>${t("notes")}</b><br>` + j.gaps.map(g=>"· "+line(g)).join("<br>")));
+  }
+  const pay = j.payoff || {};
+  const box = el("div", "payoff");
+  if (pay.error) { box.append(el("p", "q", t("proposal_head"))); box.append(el("div", "err", pay.error)); }
+  else {
+    box.append(el("p", "q", t("payoff_staff", { project: pay.project })));
+    box.append(el("p", "qsub", t("payoff_needs", { needs: (pay.needs||[]).join(" + ") })));
+    const ul = el("ul", "rank");
+    (pay.ranking||[]).forEach((row, i) => {
+      const li = el("li", i===0?"top":""); li.append(el("span","pos", i===0?"★":String(i+1)));
+      li.append(el("span","who",row.name));
+      const detail = typeof row.score === "number"
+        ? t("score_detail", { score: row.score.toFixed(1), strength: row.strength, busy: row.busyness })
+        : t("matches", { skills: row.skills.join(", ") });
+      li.append(el("span","attr", detail));
+      ul.append(li);
+    });
+    box.append(ul);
+  }
+  root.append(box);
+}
+
+document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach((x)=>x.classList.toggle("on",x===b));
+  const tab = b.dataset.tab;
+  document.querySelectorAll(".tabpane").forEach((p)=>p.classList.toggle("on", p.dataset.pane===tab));
+});
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
+
+// --- theme (light / dark / auto), shared with the Stroma console's system ---
+let THEME = store.get("vesicle-theme") || "auto";
+const media = window.matchMedia("(prefers-color-scheme: dark)");
+function resolvedDark() { return THEME === "dark" || (THEME === "auto" && media.matches); }
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", resolvedDark() ? "dark" : "light");
+  $("#themeBtn").textContent = resolvedDark() ? "☾" : "☀";
+  document.querySelectorAll("#themeSeg button").forEach((b) => b.classList.toggle("on", b.dataset.themeVal === THEME));
+}
+function setTheme(t) { THEME = t; store.set("vesicle-theme", t); applyTheme(); }
+media.addEventListener?.("change", () => { if (THEME === "auto") applyTheme(); });
+
+// --- language (persisted; select + settings segment stay in sync) ---
+function setLang(l) {
+  LANG = l; store.set("vesicle-lang", l);
+  $("#lang").value = l;
+  document.querySelectorAll("#langSeg button").forEach((b) => b.classList.toggle("on", b.dataset.langVal === l));
+  applyLang();
+}
+LANG = store.get("vesicle-lang") || "en";
+
+// --- settings modal ---
+async function openSettings() {
+  applyTheme();
+  document.querySelectorAll("#langSeg button").forEach((b) => b.classList.toggle("on", b.dataset.langVal === LANG));
+  $("#stromaStatus").textContent = "…";
+  try {
+    const s = await fetch("/api/status").then((r) => r.json());
+    $("#stromaStatus").textContent = s.stroma ? `● connected · ${s.url}` : `○ unreachable · ${s.url}`;
+  } catch { $("#stromaStatus").textContent = "○ unreachable"; }
+  $("#settingsModal").classList.add("on");
+}
+$("#settingsBtn").onclick = openSettings;
+$("#settingsClose").onclick = () => $("#settingsModal").classList.remove("on");
+$("#settingsModal").onclick = (e) => { if (e.target === $("#settingsModal")) $("#settingsModal").classList.remove("on"); };
+$("#themeBtn").onclick = () => setTheme(resolvedDark() ? "light" : "dark");
+document.querySelectorAll("#themeSeg button").forEach((b) => (b.onclick = () => setTheme(b.dataset.themeVal)));
+document.querySelectorAll("#langSeg button").forEach((b) => (b.onclick = () => setLang(b.dataset.langVal)));
+$("#logoutBtn").onclick = async () => { await fetch("/api/logout", { method: "POST" }); location.reload(); };
+
+$("#lang").onchange = (e) => setLang(e.target.value);
+$("#repropose").onclick = () => propose(true); // force a fresh LLM proposal (bypass the cache)
+$("#run").onclick = apply;
+// source editor: adopt the edited schema/data, then re-propose from it
+$("#src-use").onclick = () => {
+  SOURCE = { schema: $("#ta-schema").value, data: $("#ta-data").value };
+  $("#src-err").textContent = "";
+  try { if (SOURCE.data.trim()) JSON.parse(SOURCE.data); } catch (e) { $("#src-err").textContent = "JSON: " + e.message; return; }
+  $("#srcedit").open = false;
+  propose();
+};
+$("#src-reset").onclick = async () => { $("#src-err").textContent = ""; await loadSource($("#sourcePick").value); };
+// picking a registered source loads its schema+data into the editor (user then clicks "Use … & propose")
+$("#sourcePick").onchange = async (e) => { $("#src-err").textContent = ""; await loadSource(e.target.value); $("#srcedit").open = true; };
+
+applyTheme();
+setLang(LANG); // fill static strings for the persisted language before the source/proposal load
+(async () => { await loadSourceList(); await loadSource(); await propose(); })();
+</script>
+</body>
+</html>

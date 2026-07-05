@@ -1,0 +1,22 @@
+{
+  "name": "vesicle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Vesicle — source→graph authoring: LLM proposes an ontology, a human confirms it, rows become typed facts in StromaDB.",
+  "scripts": {
+    "serve": "tsx src/server.ts",
+    "extract-slice": "tsx src/cli/extract-slice.ts",
+    "drive-slice": "tsx src/cli/drive-slice.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

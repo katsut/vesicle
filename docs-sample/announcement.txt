@@ -1,0 +1,13 @@
+Subject: Platform team update — Q2
+
+Team,
+
+I'm happy to share that the Platform team continues to grow. Alice will lead the
+Platform team going forward. Bob and Dave have both joined Platform this quarter and
+will report to Alice.
+
+The Platform team owns the ML Recommender project, which moves to active development
+next month. Please route infra requests to Dave.
+
+Thanks,
+Alice

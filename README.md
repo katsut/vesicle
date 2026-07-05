@@ -6,8 +6,7 @@ it turns existing sources into a live, curated knowledge graph and runs it as a 
 Where StromaDB is the OSS engine (storage + query + reactivity), Vesicle is the **mapping + ingest +
 operations** around it — the part most teams don't want to build or run themselves.
 
-> Status: design stage. Overview/architecture only in this repo; planning lives in the private
-> platform repo.
+> Status: design stage — this repo carries the overview and architecture only.
 
 ## What Vesicle does
 

@@ -1,7 +1,7 @@
 # Vesicle — Architecture
 
 How Vesicle maps sources into StromaDB and operates the result. Companion to `../README.md`.
-Technical scope only; business strategy lives in the private platform repo. Design stage.
+Technical scope only. Design stage.
 
 ## Position
 

@@ -1,0 +1,37 @@
+{
+  "label": "Google Drive (files & access)",
+  "schema": "CREATE TABLE people (\n    id   INT PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE folders (\n    id   INT PRIMARY KEY,\n    name TEXT NOT NULL\n);\n\nCREATE TABLE files (\n    id        INT PRIMARY KEY,\n    name      TEXT NOT NULL,\n    owner_id  INT REFERENCES people(id),\n    folder_id INT REFERENCES folders(id)\n);\n\nCREATE TABLE file_access (\n    file_id   INT REFERENCES files(id),\n    person_id INT REFERENCES people(id),\n    role      TEXT,   -- viewer | editor\n    PRIMARY KEY (file_id, person_id)\n);\n\nCREATE TABLE sharing_events (\n    id         INT PRIMARY KEY,\n    file_id    INT REFERENCES files(id),\n    person_id  INT REFERENCES people(id),\n    action     TEXT,   -- granted | revoked\n    at         DATE\n);",
+  "data": {
+    "people": [
+      {"id": 1, "name": "Alice (admin)"},
+      {"id": 2, "name": "Bob"},
+      {"id": 3, "name": "Carol (HR)"},
+      {"id": 4, "name": "Dave (contractor)"}
+    ],
+    "folders": [
+      {"id": 1, "name": "Public"},
+      {"id": 2, "name": "Engineering"},
+      {"id": 3, "name": "HR"}
+    ],
+    "files": [
+      {"id": 1, "name": "Onboarding guide", "owner_id": 1, "folder_id": 1, "label": 0},
+      {"id": 2, "name": "Q3 roadmap", "owner_id": 1, "folder_id": 2, "label": 1},
+      {"id": 3, "name": "Comp bands 2025", "owner_id": 3, "folder_id": 3, "label": 2},
+      {"id": 4, "name": "Incident postmortem", "owner_id": 2, "folder_id": 2, "label": 1},
+      {"id": 5, "name": "Board deck", "owner_id": 1, "folder_id": 3, "label": 2}
+    ],
+    "file_access": [
+      {"file_id": 1, "person_id": 1, "role": "editor"}, {"file_id": 1, "person_id": 2, "role": "viewer"},
+      {"file_id": 1, "person_id": 3, "role": "viewer"}, {"file_id": 1, "person_id": 4, "role": "viewer"},
+      {"file_id": 2, "person_id": 1, "role": "editor"}, {"file_id": 2, "person_id": 2, "role": "viewer"},
+      {"file_id": 2, "person_id": 3, "role": "viewer"},
+      {"file_id": 3, "person_id": 1, "role": "viewer"}, {"file_id": 3, "person_id": 3, "role": "editor"},
+      {"file_id": 4, "person_id": 1, "role": "viewer"}, {"file_id": 4, "person_id": 2, "role": "editor"},
+      {"file_id": 5, "person_id": 1, "role": "editor"}, {"file_id": 5, "person_id": 3, "role": "viewer"}
+    ],
+    "sharing_events": [
+      {"id": 1, "file_id": 2, "person_id": 4, "action": "granted", "at": "2025-06-01"},
+      {"id": 2, "file_id": 5, "person_id": 2, "action": "revoked", "at": "2025-06-15"}
+    ]
+  }
+}
