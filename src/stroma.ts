@@ -16,6 +16,13 @@ export class Stroma {
     }
   }
 
+  /** GET /stats — engine counters (nodes/edges/changelog head). Used by the live pipeline view to
+   *  detect writes: a rising changelog/seqno means facts are streaming in. */
+  async stats(): Promise<Record<string, unknown>> {
+    const r = await fetch(`${this.base}/stats`, { headers: this.headers() });
+    return this.readJson(r, "stats");
+  }
+
   /** Preferred programmatic auth (stromadb #100): send the API token as a bearer header — no
    *  login/cookie round-trip. Set STROMA_API_TOKEN and start stroma-serve with the same --api-token. */
   useToken(token = process.env.STROMA_API_TOKEN): void {

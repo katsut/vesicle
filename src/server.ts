@@ -143,6 +143,18 @@ app.get("/api/status", async (_req, res) => {
   res.json({ stroma, url, auth: !NO_AUTH, user: NO_AUTH ? null : USER });
 });
 
+// Live pipeline view polls this: engine reachability + write counters (a rising changelog head = facts streaming in).
+app.get("/api/stroma-stats", async (_req, res) => {
+  const s = new Stroma();
+  if (!(await s.health())) return res.json({ reachable: false });
+  try {
+    const st = await s.stats();
+    res.json({ reachable: true, stats: st });
+  } catch (e) {
+    res.json({ reachable: false, error: (e as Error).message });
+  }
+});
+
 app.use(express.static(PUB));
 app.get("/", (_req, res) => res.sendFile(resolve(PUB, "wizard.html")));
 
