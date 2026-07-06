@@ -37,8 +37,23 @@
     --sky:#5aa0d8; --sky-soft:#182734; --clay:#d0955a; --clay-soft:#2c2418; --leaf:#40c091; --leaf-soft:#15271e;
     --good:#40c091; --bad:#e0707e;
   }
+  /* earth-night "world" — moonlit forest & ocean with warm soil at the horizon (deliberately NOT cosmic) */
+  html[data-theme="dark"] body{background:
+    radial-gradient(1200px 620px at 84% -12%, #17332b 0%, transparent 58%),
+    radial-gradient(1000px 560px at -10% 108%, #16272f 0%, transparent 55%),
+    radial-gradient(1100px 520px at 50% 118%, #241d13 0%, transparent 62%),
+    var(--bg);background-attachment:fixed}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  /* earth-day "world" — warm daylight (top), field & soil at the horizon; Vesicle's own signature,
+     the terrestrial answer to the Stroma console's starfield. */
+  body{margin:0;min-height:100vh;color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1300px 640px at 82% -14%, #f4e4b6 0%, transparent 56%),
+      linear-gradient(180deg, #f5f3ec 0%, transparent 40%),
+      radial-gradient(900px 520px at -8% 104%, #dbe8d1 0%, transparent 56%),
+      radial-gradient(1300px 560px at 50% 116%, #ebd9b3 0%, transparent 60%),
+      var(--bg);
+    background-attachment:fixed}
   .wrap{max-width:1320px;margin:0 auto;padding:6px clamp(14px,3vw,34px) 60px}
   /* full-bleed sticky topbar HUD — the Stroma console's composition, earth-warmed */
   .topbar{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,color-mix(in oklab,var(--bg) 90%,transparent),color-mix(in oklab,var(--bg) 62%,transparent));backdrop-filter:blur(11px);border-bottom:1px solid var(--line);margin-bottom:18px}
