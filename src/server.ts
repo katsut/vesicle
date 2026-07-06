@@ -71,7 +71,7 @@ const sourceById = (id?: string): Source => {
 const defaultSource = () => sourceById(DEFAULT_ID);
 
 // --- auth: a session-cookie login (mirrors the Stroma console). Default admin/password, overridable
-// via VESICLE_USER / VESICLE_PASSWORD; VESICLE_NO_AUTH=1 disables it (local dev). ---
+// via VESICLE_USER / VESICLE_PASSWORD; VESICLE_NO_AUTH=1 disables it (local dev — `pnpm serve:open`). ---
 const USER = process.env.VESICLE_USER ?? "admin";
 const PASS = process.env.VESICLE_PASSWORD ?? "password";
 const NO_AUTH = process.env.VESICLE_NO_AUTH === "1";

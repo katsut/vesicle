@@ -6,6 +6,7 @@
   "description": "Vesicle — source→graph authoring: LLM proposes an ontology, a human confirms it, rows become typed facts in StromaDB.",
   "scripts": {
     "serve": "tsx src/server.ts",
+    "serve:open": "VESICLE_NO_AUTH=1 tsx src/server.ts",
     "extract-slice": "tsx src/cli/extract-slice.ts",
     "drive-slice": "tsx src/cli/drive-slice.ts",
     "typecheck": "tsc --noEmit"
