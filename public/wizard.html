@@ -107,6 +107,28 @@
   button.opt.pick.neg{background:#6b7671;border-color:#6b7671}
   .predname{font-family:var(--mono);font-size:12.5px;color:var(--accent-ink)}
 
+  /* Named relationships — derived (evaluated, not stored). Reuses card/voice/tier/opts + earth tokens. */
+  .tier.td{background:var(--accent-soft);color:var(--accent-ink)}
+  .named-sub{color:var(--muted);font-size:12.5px;margin:-6px 2px 12px;line-height:1.45;max-width:70ch}
+  .pathrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:9px}
+  .pathrow .hoplbl{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--panel-2);border:1px solid var(--hair);border-radius:20px;padding:2px 9px;white-space:nowrap}
+  .evalnote{display:flex;gap:6px;margin-top:8px;font-size:12px;color:var(--muted);background:var(--panel-2);border:1px solid var(--hair);border-radius:var(--r-sm);padding:6px 10px;line-height:1.4}
+  .pathedit{margin-top:9px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px;color:var(--muted)}
+  .pathedit select{font:inherit;font-size:12px;color:var(--ink);border:1px solid var(--hair-strong);border-radius:var(--r-sm);padding:4px 7px;background:var(--panel)}
+  .pathedit .valid{font-family:var(--mono);font-size:11.5px}
+  .pathedit .valid.ok{color:var(--good)} .pathedit .valid.no{color:var(--bad)}
+  .tryit{margin-top:11px;border-top:1px dashed var(--hair);padding-top:11px}
+  .tryit h4{margin:0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--faint)}
+  .tryrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:6px 0;font-size:12.5px;color:var(--muted)}
+  .tryrow label{font-weight:600;color:var(--fg-dim)}
+  .tryrow select,.tryrow input[type=date]{font:inherit;font-size:12.5px;color:var(--ink);border:1px solid var(--hair-strong);border-radius:var(--r-sm);padding:4px 8px;background:var(--panel)}
+  .tryres{margin-top:9px;padding:10px 12px;border:1px solid var(--hair);border-radius:var(--r-sm);background:var(--panel-2);font-size:13px;line-height:1.5}
+  .tryres .lead{color:var(--muted);font-size:12px;margin:0 0 6px}
+  .tryres .val{display:inline-flex;flex-wrap:wrap;gap:6px}
+  .tryres .none{color:var(--faint)}
+  .tryres .trace{margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6}
+  .card.skipped{opacity:.5}
+
   .side{position:sticky;top:18px;display:flex;flex-direction:column;gap:14px}
   .panel{background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--bevel),var(--shadow);overflow:hidden}
   .tabs{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line)}
@@ -269,6 +291,7 @@
     <main>
       <div class="streamhead"><h2 data-i18n="proposal_head"></h2><div class="bar"></div></div>
       <div id="proposal"><div class="loading" data-i18n="loading"></div></div>
+      <div id="derived"></div>
     </main>
 
     <aside class="side">
@@ -318,6 +341,15 @@ const I18N = {
     gap_from_not_entity: "“{pred}”: couldn't be connected — its starting thing isn't one of the graph types — so it was skipped.",
     gap_source_unresolved: "“{pred}”: couldn't work out how to link “{src}”, so it was skipped.",
     gap_no_fk: "“{pred}”: couldn't find how “{src}” connects the two things, so it was skipped.",
+    named_head: "Named relationships", named_sub: "Name a relationship once, then evaluate it over the base facts on demand — nothing is stored, so one base change updates every answer, with history.",
+    tier_named: "Named relationship", d_confirm: "Confirm", d_edit: "Edit path", d_skip: "Skip", d_undo: "Undo",
+    d_evaluated: "Evaluated over the base facts — never stored, so it can't go stale.",
+    d_loading: "Suggesting relationships…", named_empty: "No named relationships suggested for these predicates yet.",
+    path_use: "Use path", path_cancel: "Cancel", path_valid: "composes ✓", path_invalid: "doesn't connect ✕",
+    try_head: "Try it", try_subject: "Subject", try_now: "Now", try_asof: "As of", try_result: "Result", try_none: "no match",
+    try_offline: "StromaDB is offline — start it and Apply to try this.", try_empty: "No facts yet — run Apply to load the graph, then try this.",
+    try_asof_note: "“As of” reads valid-time when the base facts carry it.", try_trace: "path:",
+    try_lead_one: "The {name} of {subject} is:", try_lead_many: "The {name} of {subject}:",
     settings: "Settings", logout: "Log out", signedIn: "signed in", v_author: "Author", v_pipeline: "Pipeline", settings_title: "Settings", settings_sub: "Theme, language, and connection.",
     set_theme: "Theme", theme_light: "Light", theme_dark: "Dark", theme_auto: "Auto",
     set_lang: "Language", set_stroma: "StromaDB connection", close: "Done",
@@ -347,6 +379,15 @@ const I18N = {
     gap_from_not_entity: "「{pred}」：起点が型として扱われていないため、つなげられずスキップしました。",
     gap_source_unresolved: "「{pred}」：「{src}」のつなぎ方が判別できず、スキップしました。",
     gap_no_fk: "「{pred}」：「{src}」が2つをどうつなぐか見つからず、スキップしました。",
+    named_head: "名前付きの関係", named_sub: "関係に一度名前を付ければ、必要なときにベースの事実から評価します — 保存しないので、1つの変更がすべての答えに履歴付きで反映されます。",
+    tier_named: "名前付きの関係", d_confirm: "確定", d_edit: "経路を編集", d_skip: "スキップ", d_undo: "戻す",
+    d_evaluated: "ベースの事実から評価 — 保存しないので陳腐化しません。",
+    d_loading: "関係を提案中…", named_empty: "この述語では、まだ名前付きの関係は提案されていません。",
+    path_use: "この経路を使う", path_cancel: "取消", path_valid: "接続OK ✓", path_invalid: "接続できません ✕",
+    try_head: "試す", try_subject: "対象", try_now: "現在", try_asof: "時点指定", try_result: "結果", try_none: "該当なし",
+    try_offline: "StromaDB がオフラインです — 起動して「適用」してから試してください。", try_empty: "まだ事実がありません — 「適用」でグラフを投入してから試してください。",
+    try_asof_note: "「時点指定」はベースの事実が有効時間を持つときに反映されます。", try_trace: "経路:",
+    try_lead_one: "{subject} の {name}:", try_lead_many: "{subject} の {name}:",
     settings: "設定", logout: "ログアウト", signedIn: "サインイン中", v_author: "作成", v_pipeline: "パイプライン", settings_title: "設定", settings_sub: "テーマ・言語・接続。",
     set_theme: "テーマ", theme_light: "ライト", theme_dark: "ダーク", theme_auto: "自動",
     set_lang: "言語", set_stroma: "StromaDB 接続", close: "完了",
@@ -376,6 +417,15 @@ const I18N = {
     gap_from_not_entity: "「{pred}」：起点未作为类型处理，无法连接，已跳过。",
     gap_source_unresolved: "「{pred}」：无法判断如何连接「{src}」，已跳过。",
     gap_no_fk: "「{pred}」：找不到「{src}」如何连接两者，已跳过。",
+    named_head: "命名关系", named_sub: "为关系命名一次，按需在基础事实上求值 — 不存储，因此一次改动即可更新所有答案并保留历史。",
+    tier_named: "命名关系", d_confirm: "确认", d_edit: "编辑路径", d_skip: "跳过", d_undo: "撤销",
+    d_evaluated: "在基础事实上求值 — 从不存储，因此不会过时。",
+    d_loading: "正在建议关系…", named_empty: "对于这些谓词，暂无命名关系建议。",
+    path_use: "使用此路径", path_cancel: "取消", path_valid: "可组合 ✓", path_invalid: "无法连接 ✕",
+    try_head: "试一试", try_subject: "对象", try_now: "现在", try_asof: "截至", try_result: "结果", try_none: "无匹配",
+    try_offline: "StromaDB 已离线 — 启动并「应用」后再试。", try_empty: "尚无事实 — 请先「应用」载入图，再试。",
+    try_asof_note: "「截至」在基础事实带有有效时间时才生效。", try_trace: "路径:",
+    try_lead_one: "{subject} 的 {name}:", try_lead_many: "{subject} 的 {name}:",
     settings: "设置", logout: "登出", signedIn: "已登录", v_author: "编辑", v_pipeline: "管道", settings_title: "设置", settings_sub: "主题、语言与连接。",
     set_theme: "主题", theme_light: "浅色", theme_dark: "深色", theme_auto: "自动",
     set_lang: "语言", set_stroma: "StromaDB 连接", close: "完成",
@@ -389,12 +439,16 @@ function t(k, v) {
 }
 function applyLang() {
   document.querySelectorAll("[data-i18n]").forEach((e) => { e.innerHTML = t(e.getAttribute("data-i18n")); });
-  if (PROPOSAL) { renderSource(); renderProposal(); renderMapping(); }
+  if (PROPOSAL) { renderSource(); renderProposal(); renderMapping(); renderDerived(); }
 }
 
 let PROPOSAL = null;   // { tables, mapping }
 const STATE = {};      // per-predicate confirm state: { [name]: { card, keepProps, keepValid } }
 let SOURCE = { schema: "", data: "" }; // the configured source (schema DDL + sample data JSON)
+// derived relations (named 2-hop compositions, evaluated not stored) suggested by /api/propose-derived
+let DERIVED = [];          // DerivedRelation[] (rule.path is mutated in place by "Edit path")
+let DERIVED_LOADING = false;
+const DSTATE = {};         // per-derived UI state: { status, subjectId, subjects, asOf, result, editing, edit, tried }
 
 async function loadSourceList() {
   const j = await fetch("/api/sources").then((r) => r.json());
@@ -426,11 +480,200 @@ async function propose(fresh = false) {
     if (!r.ok) throw new Error(j.error || "propose failed");
     PROPOSAL = j;
     for (const p of j.mapping.predicates) STATE[p.name] = { card: p.cardinality, keepProps: true, keepValid: true };
-    renderSource(); renderProposal(); renderGraph(); renderMapping();
+    DERIVED = []; for (const k of Object.keys(DSTATE)) delete DSTATE[k]; // fresh base → fresh derived
+    renderSource(); renderProposal(); renderGraph(); renderMapping(); renderDerived();
     $("#run").disabled = false;
+    loadDerived(); // suggest named relationships from the confirmed base predicates (best-effort)
   } catch (e) {
     $("#proposal").innerHTML = `<div class="err">${e.message}</div>`;
   }
+}
+
+// --- Named relationships (derived, evaluated not stored) ---------------------------------------------
+async function loadDerived() {
+  DERIVED_LOADING = true; renderDerived();
+  try {
+    const r = await fetch("/api/propose-derived", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mapping: PROPOSAL.mapping }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "propose-derived failed");
+    DERIVED = j.derived || [];
+    for (const d of DERIVED) DSTATE[d.name] ??= { status: "pending", subjectId: null, subjects: null, asOf: null, result: null, editing: false, edit: null, tried: false };
+  } catch {
+    DERIVED = []; // graceful: no suggestions rather than an error state
+  } finally {
+    DERIVED_LOADING = false; renderDerived();
+  }
+}
+
+const baseP = (name) => PROPOSAL.mapping.predicates.find((p) => p.name === name);
+// the chain of graph types a rule walks: [from, mid, …, to] + whether the path composes
+function hopTypes(rule) {
+  const types = [rule.from]; let cursor = rule.from; let ok = rule.path.length > 0;
+  for (const h of rule.path) {
+    const b = baseP(h.predicate);
+    if (!b) { ok = false; types.push("?"); continue; }
+    const ft = h.direction === "forward" ? b.from : b.to;
+    const tt = h.direction === "forward" ? b.to : b.from;
+    if (ft !== cursor) ok = false;
+    cursor = tt; types.push(tt);
+  }
+  if (cursor !== rule.to) ok = false;
+  return { types, ok };
+}
+
+const intToDate = (n) => { const s = String(n); return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`; };
+const dateToInt = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || ""); return m ? Number(m[1]+m[2]+m[3]) : null; };
+
+function renderDerived() {
+  const root = $("#derived"); if (!root) return; root.innerHTML = "";
+  if (!PROPOSAL) return;
+  const head = el("div", "streamhead", `<h2>${t("named_head")}</h2><div class="bar"></div>`);
+  head.style.marginTop = "22px"; root.append(head);
+  root.append(el("p", "named-sub", t("named_sub")));
+  if (DERIVED_LOADING) { root.append(el("div", "loading", t("d_loading"))); return; }
+  if (!DERIVED.length) { root.append(el("div", "loading", t("named_empty"))); return; }
+  for (const rule of DERIVED) root.append(derivedCard(rule));
+}
+
+function pathChips(rule) {
+  const row = el("div", "pathrow");
+  const { types } = hopTypes(rule);
+  row.append(el("span", "etype", types[0] ?? rule.from));
+  rule.path.forEach((h, i) => {
+    row.append(el("span", "hoplbl", `—${h.predicate}${h.direction === "reverse" ? " (rev)" : ""}→`));
+    row.append(el("span", "etype", types[i + 1] ?? "?"));
+  });
+  return row;
+}
+
+function derivedCard(rule) {
+  const st = DSTATE[rule.name];
+  const c = el("article", "card" + (st.status === "skipped" ? " skipped" : ""));
+  c.append(el("span", "tier td", t("tier_named")));
+  const v = el("div", "voice"); v.append(el("div", "avatar", "✦"));
+  const say = el("div", "say");
+  say.append(el("p", "q", rule.rationale || rule.name));       // the plain sentence
+  say.append(pathChips(rule));                                  // the verifiable chip-path
+  say.append(el("div", "evalnote", `◆ ${t("d_evaluated")}`));
+  const opts = el("div", "opts");
+  if (st.status === "skipped") {
+    const undo = el("button", "opt", t("d_undo")); undo.onclick = () => { st.status = "pending"; renderDerived(); };
+    opts.append(undo);
+  } else {
+    const conf = el("button", "opt" + (st.status === "confirmed" ? " pick" : ""), t("d_confirm"));
+    conf.onclick = () => { st.status = "confirmed"; renderDerived(); if (!st.tried) tryDerived(rule.name); };
+    const edit = el("button", "opt" + (st.editing ? " pick" : ""), t("d_edit"));
+    edit.onclick = () => { st.editing = !st.editing; if (st.editing && !st.edit) st.edit = { p1: rule.path[0]?.predicate, p2: rule.path[1]?.predicate }; renderDerived(); };
+    const skip = el("button", "opt", t("d_skip"));
+    skip.onclick = () => { st.status = "skipped"; st.editing = false; renderDerived(); };
+    opts.append(conf, edit, skip);
+  }
+  say.append(opts);
+  if (st.editing) say.append(pathEditor(rule));
+  if (st.status === "confirmed") say.append(tryPanel(rule));
+  v.append(say); c.append(v); return c;
+}
+
+function pathEditor(rule) {
+  const st = DSTATE[rule.name];
+  const wrap = el("div", "pathedit");
+  const mkSel = (cur, onch) => {
+    const s = document.createElement("select");
+    for (const p of PROPOSAL.mapping.predicates) {
+      const o = document.createElement("option"); o.value = p.name; o.textContent = `${p.name} (${p.from}→${p.to})`;
+      if (p.name === cur) o.selected = true; s.append(o);
+    }
+    s.onchange = (e) => onch(e.target.value); return s;
+  };
+  wrap.append(mkSel(st.edit.p1, (v) => { st.edit.p1 = v; renderDerived(); }));
+  wrap.append(el("span", "hoplbl", "then"));
+  wrap.append(mkSel(st.edit.p2, (v) => { st.edit.p2 = v; renderDerived(); }));
+  const p1 = baseP(st.edit.p1), p2 = baseP(st.edit.p2);
+  const ok = !!(p1 && p2 && p1.to === p2.from);
+  wrap.append(el("span", "valid " + (ok ? "ok" : "no"), ok ? t("path_valid") : t("path_invalid")));
+  const use = el("button", "opt", t("path_use")); use.disabled = !ok;
+  use.onclick = () => {
+    if (!ok) return;
+    rule.path = [{ predicate: p1.name, direction: "forward" }, { predicate: p2.name, direction: "forward" }];
+    rule.from = p1.from; rule.to = p2.to;
+    rule.cardinality = (p1.cardinality === "one" && p2.cardinality === "one") ? "one" : "many";
+    st.editing = false; st.result = null; st.subjectId = null; st.subjects = null; st.tried = false;
+    renderDerived(); if (st.status === "confirmed") tryDerived(rule.name);
+  };
+  const cancel = el("button", "opt", t("path_cancel")); cancel.onclick = () => { st.editing = false; renderDerived(); };
+  wrap.append(use, cancel);
+  return wrap;
+}
+
+function tryPanel(rule) {
+  const st = DSTATE[rule.name];
+  const box = el("div", "tryit");
+  box.append(el("h4", null, t("try_head")));
+  const row = el("div", "tryrow");
+  row.append(el("label", null, t("try_subject")));
+  const sel = document.createElement("select");
+  const subs = st.subjects || [];
+  if (!subs.length) { const o = document.createElement("option"); o.textContent = "…"; sel.append(o); sel.disabled = true; }
+  for (const s of subs) { const o = document.createElement("option"); o.value = s.id; o.textContent = s.label; if (st.subjectId === s.id) o.selected = true; sel.append(o); }
+  sel.onchange = (e) => { st.subjectId = Number(e.target.value); tryDerived(rule.name); };
+  row.append(sel);
+  const seg = el("span", "seg");
+  const bnow = el("button", st.asOf == null ? "on" : "", t("try_now"));
+  bnow.onclick = () => { st.asOf = null; tryDerived(rule.name); };
+  const basof = el("button", st.asOf != null ? "on" : "", t("try_asof"));
+  basof.onclick = () => { st.asOf = st.asOf ?? 20240101; tryDerived(rule.name); };
+  seg.append(bnow, basof); row.append(seg);
+  if (st.asOf != null) {
+    const di = document.createElement("input"); di.type = "date"; di.value = intToDate(st.asOf);
+    di.onchange = (e) => { st.asOf = dateToInt(e.target.value) ?? st.asOf; tryDerived(rule.name); };
+    row.append(di);
+  }
+  box.append(row);
+  box.append(el("div", "tryrow", `<span style="font-size:11.5px;color:var(--faint)">${t("try_asof_note")}</span>`));
+  box.append(resultBox(rule));
+  return box;
+}
+
+function resultBox(rule) {
+  const st = DSTATE[rule.name], r = st.result, box = el("div", "tryres");
+  if (r == null || r.loading) { box.append(el("div", "none", t("loading"))); return box; }
+  if (r.error) { box.append(el("div", "none", r.error)); return box; }
+  if (r.reachable === false) { box.append(el("div", "none", t("try_offline"))); return box; }
+  const subjLabel = r.subject?.label ?? "";
+  const nodes = rule.cardinality === "one" ? (r.one ? [r.one] : []) : (r.result || []);
+  if (!st.subjects?.length || !subjLabel) { box.append(el("div", "none", t("try_empty"))); return box; }
+  box.append(el("p", "lead", t(rule.cardinality === "one" ? "try_lead_one" : "try_lead_many", { name: rule.name, subject: subjLabel })));
+  const val = el("div", "val");
+  if (!nodes.length) val.append(el("span", "none", t("try_none")));
+  else for (const n of nodes) val.append(el("span", "etype", n.label));
+  box.append(val);
+  if (r.steps && r.steps.length) {
+    const parts = r.steps.map((s) => `${s.predicate}·${s.op}→[${s.reached.map((x) => x.label).join(", ") || "∅"}]`);
+    box.append(el("div", "trace", `${t("try_trace")} ${subjLabel} ▸ ${parts.join(" ▸ ")}`));
+  }
+  return box;
+}
+
+async function tryDerived(name) {
+  const rule = DERIVED.find((d) => d.name === name); if (!rule) return;
+  const st = DSTATE[name]; st.tried = true; st.result = { loading: true }; renderDerived();
+  try {
+    const body = { rule, mapping: confirmedMapping(), schema: SOURCE.schema, data: SOURCE.data };
+    if (st.subjectId != null) body.subject = st.subjectId;
+    if (st.asOf != null) body.asOf = st.asOf;
+    const r = await fetch("/api/evaluate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "evaluate failed");
+    st.result = j;
+    if (Array.isArray(j.subjects)) st.subjects = j.subjects;
+    if (st.subjectId == null && j.subject) st.subjectId = j.subject.id;
+  } catch (e) {
+    st.result = { error: e.message };
+  }
+  renderDerived();
 }
 
 function renderSource() {

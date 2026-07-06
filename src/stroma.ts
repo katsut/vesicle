@@ -103,6 +103,13 @@ export class Stroma {
     return this.query(op);
   }
 
+  /** point(subject, predicate) → the current one-cardinality node in effect, or null. */
+  async point(subject: number, predicate: string): Promise<number | null> {
+    const j = await this.query({ op: "point", subject, predicate });
+    const one = j.one as { node?: number } | null;
+    return one?.node ?? null;
+  }
+
   /** point(subject, predicate) valid-time as-of `at` for a one-cardinality predicate → the node in
    *  effect at that instant, or null (e.g. the membership has ended). */
   async pointAsOf(subject: number, predicate: string, at: number): Promise<number | null> {

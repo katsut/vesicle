@@ -17,10 +17,13 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve, basename } from "node:path";
 import { parseSchema } from "./schema.ts";
 import { proposeMapping } from "./propose.ts";
+import { proposeDerived, composeDerived } from "./proposeDerived.ts";
 import { transform } from "./transform.ts";
+import type { TransformResult } from "./transform.ts";
 import { Stroma } from "./stroma.ts";
 import { planPayoff, runPayoff } from "./payoff.ts";
-import type { Mapping } from "./types.ts";
+import { checkDerivedPath, evaluateDerived } from "./deriveEval.ts";
+import type { DerivedRelation, Mapping } from "./types.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUB = resolve(HERE, "../public");
@@ -69,6 +72,20 @@ const sourceById = (id?: string): Source => {
   return all.find((s) => s.id === id) ?? all.find((s) => s.id === DEFAULT_ID) ?? all[0]!;
 };
 const defaultSource = () => sourceById(DEFAULT_ID);
+
+// global node id → a display name (row.name, falling back to the pk) — for the payoff ranking and the
+// derived-relation "Try it" panel. Node ids are deterministic for the same mapping+data, so this map
+// lines up with the ids in the live graph loaded by /api/apply.
+function buildLabels(tr: TransformResult, data: Rows): Record<number, string> {
+  const label: Record<number, string> = {};
+  for (const [table, gtype] of Object.entries(tr.typeOf)) {
+    for (const row of data[table] ?? []) {
+      const g = tr.idMap[gtype]?.[String(row.id)];
+      if (g != null) label[g] = String(row.name ?? row.id);
+    }
+  }
+  return label;
+}
 
 // --- auth: a session-cookie login (mirrors the Stroma console). Default admin/password, overridable
 // via VESICLE_USER / VESICLE_PASSWORD; VESICLE_NO_AUTH=1 disables it (local dev — `pnpm serve:open`). ---
@@ -235,13 +252,7 @@ app.post("/api/apply", async (req, res) => {
       out.payoff = { error: "no target project in the graph to staff" };
       return res.json(out);
     }
-    const label: Record<number, string> = {};
-    for (const [table, gtype] of Object.entries(tr.typeOf)) {
-      for (const row of data[table] ?? []) {
-        const g = tr.idMap[gtype]?.[String(row.id)];
-        if (g != null) label[g] = String(row.name ?? row.id);
-      }
-    }
+    const label = buildLabels(tr, data);
     const needs = (await db.expand(targetGid, plan.needsPred)).map((g) => label[g] ?? `#${g}`);
     const ranking = await runPayoff(db, tr, plan, targetGid, (g) => label[g] ?? `#${g}`);
     out.payoff = { project: String(target?.name), needs, ranking };
@@ -250,6 +261,106 @@ app.post("/api/apply", async (req, res) => {
     res.status(500).json({ error: (e as Error).message });
   }
 });
+
+// Suggest DERIVED relations (named 2-hop compositions over the confirmed base predicates), evaluated
+// on read rather than stored. LLM path is best-effort; a mechanical composer is the graceful fallback.
+// Every candidate is type-checked against the mapping before it is returned, so a bad path is dropped.
+const derivedCache = new Map<string, { derived: DerivedRelation[]; source: string }>();
+
+app.post("/api/propose-derived", async (req, res) => {
+  try {
+    const mapping = req.body?.mapping as Mapping | undefined;
+    if (!mapping || !Array.isArray(mapping.predicates)) return res.status(400).json({ error: "missing mapping.predicates" });
+    const fresh = req.body?.fresh === true;
+    const cacheKey = JSON.stringify(mapping.predicates.map((p) => [p.name, p.from, p.to, p.cardinality]));
+    if (!fresh) {
+      const hit = derivedCache.get(cacheKey);
+      if (hit) return res.json(hit);
+    }
+    const fromLlm = await proposeDerived(mapping);
+    const candidates = fromLlm.length ? fromLlm : composeDerived(mapping);
+    // keep only paths that mechanically compose; dedupe by name
+    const seen = new Set<string>();
+    const derived = candidates.filter((r) => {
+      if (seen.has(r.name)) return false;
+      seen.add(r.name);
+      return checkDerivedPath(mapping, r).length === 0;
+    });
+    const result = { derived, source: fromLlm.length ? "llm" : "mechanical" };
+    derivedCache.set(cacheKey, result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// Evaluate a derived relation from a subject over the LIVE graph — chaining point/expand, never a
+// stored edge. Returns candidate subjects (of the relation's from-type) so the UI can offer a picker,
+// plus the evaluated result and a per-hop trace. `asOf` (a YYYYMMDD instant) reads valid-time as-of.
+async function handleEvaluate(req: express.Request, res: express.Response): Promise<void> {
+  try {
+    // POST carries JSON in the body; GET carries JSON-encoded rule/mapping in the query string.
+    const q = req.query as Record<string, string | undefined>;
+    const parse = (v: string | undefined) => (v ? JSON.parse(v) : undefined);
+    const rule = (req.body?.rule as DerivedRelation | undefined) ?? (parse(q.rule) as DerivedRelation | undefined);
+    const mapping = (req.body?.mapping as Mapping | undefined) ?? (parse(q.mapping) as Mapping | undefined);
+    const asOfRaw = req.body?.asOf ?? q.asOf;
+    const asOf = asOfRaw == null || asOfRaw === "" ? undefined : Number(asOfRaw);
+    const subjRaw = req.body?.subject ?? q.subject;
+    if (!rule || !mapping) {
+      res.status(400).json({ error: "missing rule or mapping" });
+      return;
+    }
+    const typeErrors = checkDerivedPath(mapping, rule);
+    if (typeErrors.length) {
+      res.status(400).json({ error: "derived path does not compose", typeErrors });
+      return;
+    }
+
+    const schema = parseSchema((req.body?.schema as string | undefined) ?? (q.schema as string | undefined) ?? defaultSource().schema);
+    let data: Rows;
+    try {
+      data = JSON.parse((req.body?.data as string | undefined) ?? (q.data as string | undefined) ?? defaultSource().data) as Rows;
+    } catch (e) {
+      res.status(400).json({ error: `sample data is not valid JSON: ${(e as Error).message}` });
+      return;
+    }
+
+    const tr = transform(schema, mapping, data);
+    const label = buildLabels(tr, data);
+    const named = (id: number) => ({ id, label: label[id] ?? `#${id}` });
+    const subjects = Object.values(tr.idMap[rule.from] ?? {}).sort((a, b) => a - b).map(named);
+
+    const db = new Stroma();
+    if (!(await db.health())) {
+      res.json({ reachable: false, subjects, asOf: asOf ?? null });
+      return;
+    }
+    await db.ensureAuthed();
+
+    const subject = subjRaw != null && subjRaw !== "" ? Number(subjRaw) : subjects[0]?.id;
+    if (subject == null) {
+      res.json({ reachable: true, subjects, asOf: asOf ?? null, result: [], one: null, steps: [] });
+      return;
+    }
+
+    const evalResult = await evaluateDerived(db, mapping, rule, subject, asOf);
+    res.json({
+      reachable: true,
+      subjects,
+      subject: named(subject),
+      asOf: evalResult.asOf,
+      cardinality: evalResult.cardinality,
+      result: evalResult.result.map(named),
+      one: evalResult.one != null ? named(evalResult.one) : null,
+      steps: evalResult.steps.map((s) => ({ predicate: s.predicate, direction: s.direction, op: s.op, reached: s.reached.map(named) })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+}
+app.post("/api/evaluate", handleEvaluate);
+app.get("/api/evaluate", handleEvaluate);
 
 app.listen(PORT, () => {
   console.log(`\n  Vesicle authoring  →  http://127.0.0.1:${PORT}/`);

@@ -1,7 +1,6 @@
 // Given ONLY the source schema, an LLM proposes a graph ontology + mapping.
-// A human later confirms the proposal in plain language; this is the un-simulated proposer. The proposal
-// is graded against the expert gold_mapping (score.py) — that's how we learn whether "AI proposes
-// the structure" actually holds, rather than being hand-waved.
+// A human later confirms the proposal in plain language; this is the un-simulated proposer — the test
+// of whether "AI proposes the structure" actually holds, rather than being hand-waved.
 
 import type { Mapping, SchemaModel } from "./types.ts";
 import { callLLM, extractJson } from "./llm.ts";
