@@ -55,13 +55,19 @@
       radial-gradient(1300px 560px at 50% 116%, #ebd9b3 0%, transparent 60%),
       var(--bg);
     background-attachment:fixed}
-  .wrap{max-width:1320px;margin:0 auto;padding:6px clamp(14px,3vw,34px) 60px}
+  .wrap{max-width:1760px;margin:0 auto;padding:6px 14px 60px}
   /* full-bleed sticky topbar HUD — the Stroma console's composition, earth-warmed */
   .topbar{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,color-mix(in oklab,var(--bg) 90%,transparent),color-mix(in oklab,var(--bg) 62%,transparent));backdrop-filter:blur(11px);border-bottom:1px solid var(--line);margin-bottom:18px}
-  .topbar-inner{max-width:1320px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px clamp(14px,3vw,34px)}
+  .topbar-inner{max-width:1760px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px 14px}
   .mark{display:inline-flex;align-items:center;gap:10px;font-weight:640;letter-spacing:.2px;font-size:16px}
   .mark .dot{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 34% 32%,#3fbfa2 0%,var(--accent) 46%,var(--accent-ink) 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 1px 3px rgba(14,110,92,.4)}
   .mark small{font-weight:500;color:var(--faint);font-size:12px}
+  /* topbar status pills — shared vocabulary with the Stroma console (connection · signed-in) */
+  .pill{display:inline-flex;align-items:center;gap:6px;font:500 11.5px/1 var(--mono);color:var(--fg-dim);background:var(--panel);border:1px solid var(--line);border-radius:100px;padding:6px 10px;white-space:nowrap}
+  .pill b{color:var(--fg);font-weight:600}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px color-mix(in oklab,var(--accent) 80%,transparent);flex:none}
+  .pill.off{color:var(--mut)} .pill.off .dot{background:var(--mut);box-shadow:none}
+  .pill[hidden]{display:none}
   .tagline{color:var(--muted);font-size:13.5px;margin:2px 0 18px;max-width:70ch}
   .tagline b{color:var(--ink);font-weight:600}
   .app{display:grid;grid-template-columns:220px minmax(0,1fr) 400px;gap:20px;align-items:start}
@@ -173,8 +179,10 @@
 </head>
 <body>
 <header class="topbar"><div class="topbar-inner"><span class="mark"><span class="dot"></span>Vesicle <small>authoring</small></span>
+    <span class="pill conn off" id="connPill" title="StromaDB"><span class="dot"></span><span id="connText">stroma</span></span>
     <span class="spacer"></span>
     <div class="ctls">
+      <span class="pill user" id="userPill" hidden><span data-i18n="signedIn">signed in</span> <b id="userName"></b></span>
       <span class="ctl select"><select id="lang" aria-label="language">
         <option value="en">EN</option><option value="ja">日本語</option><option value="zh">中文</option>
       </select></span>
@@ -297,7 +305,7 @@ const I18N = {
     gap_from_not_entity: "“{pred}”: couldn't be connected — its starting thing isn't one of the graph types — so it was skipped.",
     gap_source_unresolved: "“{pred}”: couldn't work out how to link “{src}”, so it was skipped.",
     gap_no_fk: "“{pred}”: couldn't find how “{src}” connects the two things, so it was skipped.",
-    settings: "Settings", logout: "Log out", settings_title: "Settings", settings_sub: "Theme, language, and connection.",
+    settings: "Settings", logout: "Log out", signedIn: "signed in", settings_title: "Settings", settings_sub: "Theme, language, and connection.",
     set_theme: "Theme", theme_light: "Light", theme_dark: "Dark", theme_auto: "Auto",
     set_lang: "Language", set_stroma: "StromaDB connection", close: "Done",
   },
@@ -326,7 +334,7 @@ const I18N = {
     gap_from_not_entity: "「{pred}」：起点が型として扱われていないため、つなげられずスキップしました。",
     gap_source_unresolved: "「{pred}」：「{src}」のつなぎ方が判別できず、スキップしました。",
     gap_no_fk: "「{pred}」：「{src}」が2つをどうつなぐか見つからず、スキップしました。",
-    settings: "設定", logout: "ログアウト", settings_title: "設定", settings_sub: "テーマ・言語・接続。",
+    settings: "設定", logout: "ログアウト", signedIn: "サインイン中", settings_title: "設定", settings_sub: "テーマ・言語・接続。",
     set_theme: "テーマ", theme_light: "ライト", theme_dark: "ダーク", theme_auto: "自動",
     set_lang: "言語", set_stroma: "StromaDB 接続", close: "完了",
   },
@@ -355,7 +363,7 @@ const I18N = {
     gap_from_not_entity: "「{pred}」：起点未作为类型处理，无法连接，已跳过。",
     gap_source_unresolved: "「{pred}」：无法判断如何连接「{src}」，已跳过。",
     gap_no_fk: "「{pred}」：找不到「{src}」如何连接两者，已跳过。",
-    settings: "设置", logout: "登出", settings_title: "设置", settings_sub: "主题、语言与连接。",
+    settings: "设置", logout: "登出", signedIn: "已登录", settings_title: "设置", settings_sub: "主题、语言与连接。",
     set_theme: "主题", theme_light: "浅色", theme_dark: "深色", theme_auto: "自动",
     set_lang: "语言", set_stroma: "StromaDB 连接", close: "完成",
   },
@@ -614,15 +622,26 @@ function setLang(l) {
 }
 LANG = store.get("vesicle-lang") || "en";
 
-// --- settings modal ---
+// --- status pills (connection · signed-in) + settings modal ---
+async function refreshStatus() {
+  try {
+    const s = await fetch("/api/status").then((r) => r.json());
+    $("#connPill").classList.toggle("off", !s.stroma);
+    $("#connPill").title = `StromaDB · ${s.url}`;
+    $("#connText").textContent = s.stroma ? "stroma" : "stroma offline";
+    if (s.auth && s.user) { $("#userName").textContent = s.user; $("#userPill").hidden = false; }
+    else $("#userPill").hidden = true;
+    if ($("#stromaStatus")) $("#stromaStatus").textContent = s.stroma ? `● connected · ${s.url}` : `○ unreachable · ${s.url}`;
+  } catch {
+    $("#connPill").classList.add("off"); $("#connText").textContent = "stroma offline";
+    if ($("#stromaStatus")) $("#stromaStatus").textContent = "○ unreachable";
+  }
+}
 async function openSettings() {
   applyTheme();
   document.querySelectorAll("#langSeg button").forEach((b) => b.classList.toggle("on", b.dataset.langVal === LANG));
   $("#stromaStatus").textContent = "…";
-  try {
-    const s = await fetch("/api/status").then((r) => r.json());
-    $("#stromaStatus").textContent = s.stroma ? `● connected · ${s.url}` : `○ unreachable · ${s.url}`;
-  } catch { $("#stromaStatus").textContent = "○ unreachable"; }
+  await refreshStatus();
   $("#settingsModal").classList.add("on");
 }
 $("#settingsBtn").onclick = openSettings;
@@ -650,6 +669,7 @@ $("#sourcePick").onchange = async (e) => { $("#src-err").textContent = ""; await
 
 applyTheme();
 setLang(LANG); // fill static strings for the persisted language before the source/proposal load
+refreshStatus(); // populate the topbar connection · signed-in pills
 (async () => { await loadSourceList(); await loadSource(); await propose(); })();
 </script>
 </body>

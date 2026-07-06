@@ -140,7 +140,7 @@ app.post("/api/logout", (req, res) => {
 app.get("/api/status", async (_req, res) => {
   const url = process.env.STROMA_URL ?? "http://127.0.0.1:7687";
   const stroma = await new Stroma().health();
-  res.json({ stroma, url, auth: !NO_AUTH });
+  res.json({ stroma, url, auth: !NO_AUTH, user: NO_AUTH ? null : USER });
 });
 
 app.use(express.static(PUB));
