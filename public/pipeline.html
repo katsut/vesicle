@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vesicle — ingestion pipeline</title>
+<style>
+  :root{
+    --bg:#f2efe6; --bg-2:#eae5d9; --panel:#fffdf7; --panel-2:#f6f1e7;
+    --line:#e5dfd1; --line-2:#d4ccba; --fg:#211d15; --dim:#574f40; --mut:#8b8371;
+    --earth:#2f9e73; --earth-2:#237a58; --clay:#b06a2a; --sky:#2c6fa6;
+    --r:12px; --r-sm:8px;
+    --shadow:0 1px 0 rgba(0,0,0,.02), 0 14px 30px -16px rgba(60,50,30,.22);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.6);
+    --panel-grad:linear-gradient(163deg,color-mix(in oklab,var(--panel) 86%,var(--bg-2) 14%),var(--panel));
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+  }
+  html[data-theme="dark"]{
+    --bg:#13181a; --bg-2:#181e20; --panel:#1d2427; --panel-2:#222a2d;
+    --line:#2b3437; --line-2:#3a4548; --fg:#e9ede9; --dim:#a9b3ab; --mut:#6f7a72;
+    --earth:#40c091; --earth-2:#35a67c; --clay:#d0955a; --sky:#5aa0d8;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 16px 34px -14px rgba(0,0,0,.62);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;color:var(--fg);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased;min-height:100vh;
+    background:
+      radial-gradient(1300px 640px at 82% -14%, #f4e4b6 0%, transparent 56%),
+      linear-gradient(180deg, #f5f3ec 0%, transparent 40%),
+      radial-gradient(900px 520px at -8% 104%, #dbe8d1 0%, transparent 56%),
+      radial-gradient(1300px 560px at 50% 116%, #ebd9b3 0%, transparent 60%),
+      var(--bg);
+    background-attachment:fixed}
+  html[data-theme="dark"] body{background:
+      radial-gradient(1200px 620px at 84% -14%, #17332b 0%, transparent 58%),
+      radial-gradient(1000px 560px at -10% 108%, #16272f 0%, transparent 55%),
+      radial-gradient(1100px 520px at 60% 120%, #241d13 0%, transparent 62%),
+      var(--bg)}
+  .stage{max-width:1500px;margin:0 auto;padding:22px clamp(14px,3vw,34px) 34px}
+  header.top{display:flex;align-items:baseline;gap:13px;flex-wrap:wrap;margin-bottom:3px}
+  h1{font-size:16px;font-weight:640;letter-spacing:.2px;margin:0}
+  h1 b{color:var(--earth)}
+  .live{display:inline-flex;align-items:center;gap:7px;font:600 11px/1 var(--mono);color:var(--earth);
+    background:var(--panel);border:1px solid color-mix(in oklab,var(--earth) 40%,var(--line));border-radius:100px;padding:5px 10px}
+  .live .d{width:7px;height:7px;border-radius:50%;background:var(--earth);box-shadow:0 0 8px var(--earth);animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .sub{color:var(--dim);font-size:12.5px;margin:2px 0 18px;max-width:96ch}
+  .sub b{color:var(--fg);font-weight:600}
+
+  .board{position:relative;display:grid;grid-template-columns:1.1fr .92fr .82fr .96fr .95fr;gap:clamp(18px,2.8vw,46px);align-items:center;min-height:540px}
+  canvas#wire{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
+  .col{position:relative;z-index:2;display:flex;flex-direction:column;gap:10px;justify-content:center}
+  .col-h{font:600 10px/1 var(--mono);text-transform:uppercase;letter-spacing:.13em;color:var(--mut);margin:0 2px 3px}
+
+  .node{background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;
+    box-shadow:var(--bevel),var(--shadow)}
+  .node .t{font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px}
+  .node .m{color:var(--mut);font:10.5px/1.4 var(--mono);margin-top:3px}
+  .ic{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:12px;font-weight:700;
+    background:color-mix(in oklab,var(--earth) 18%,transparent);color:var(--earth)}
+  .ic.txt{background:color-mix(in oklab,var(--sky) 20%,transparent);color:var(--sky)}
+  .ic.clay{background:color-mix(in oklab,var(--clay) 22%,transparent);color:var(--clay)}
+  .src{padding:8px 11px}
+  .src .t{font-size:12.5px}
+  .grp{display:flex;flex-direction:column;gap:7px}
+  .grp+.grp{margin-top:11px}
+  .grp-l{font:600 9.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mut);margin:0 0 1px 2px}
+  .grp-l.text{color:color-mix(in oklab,var(--sky) 66%,var(--mut))}
+  .big{padding:12px 13px}
+  .big .t{font-size:13.5px}
+  .tag{display:inline-block;font:600 9.5px/1 var(--mono);letter-spacing:.03em;padding:3px 7px;border-radius:100px;margin-top:8px}
+  .tag.zero{color:var(--earth);background:color-mix(in oklab,var(--earth) 15%,transparent);border:1px solid color-mix(in oklab,var(--earth) 38%,transparent)}
+  .tag.llm{color:var(--clay);background:color-mix(in oklab,var(--clay) 16%,transparent);border:1px solid color-mix(in oklab,var(--clay) 42%,transparent)}
+  .types{margin-top:10px;border-top:1px solid var(--line);padding-top:9px;display:flex;flex-direction:column;gap:6px}
+  .ty{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .tn{font:600 12px var(--sans);color:var(--fg)}
+  .prov{display:inline-flex;gap:4px}
+  .prov i{width:17px;height:17px;border-radius:5px;font:700 9px/17px var(--mono);text-align:center;font-style:normal}
+  .prov .p-e{background:color-mix(in oklab,var(--earth) 20%,transparent);color:var(--earth)}
+  .prov .p-c{background:color-mix(in oklab,var(--clay) 22%,transparent);color:var(--clay)}
+  .prov .p-t{background:color-mix(in oklab,var(--sky) 22%,transparent);color:var(--sky)}
+  .nn{margin-top:9px;font:10.5px/1.45 var(--mono);color:var(--mut)}
+  .nn b{color:var(--earth)}
+
+  /* StromaDB — the cosmic endpoint, always space, in both themes */
+  .stroma{background:radial-gradient(120% 120% at 78% -10%,#13293c 0%,transparent 55%),linear-gradient(165deg,#141a26,#0b0e14);
+    border:1px solid #24304a;border-radius:var(--r);padding:14px 14px 12px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(55,214,168,.08),0 20px 50px -22px rgba(0,0,0,.85)}
+  .stroma .t{font-size:14.5px;color:#e8ecf4}
+  .stroma .t b{color:#37d6a8}
+  .stroma .ic{background:color-mix(in oklab,#37d6a8 22%,transparent);color:#37d6a8}
+  .stroma .m{color:#8a94a8}
+  .mini{position:relative;height:84px;margin-top:10px;border-top:1px solid #1e2740;padding-top:9px;overflow:hidden}
+  #graphcv{display:block;width:100%;height:100%}
+  .stroma .pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .stroma .pills span{font:600 9.5px/1 var(--mono);color:#37d6a8;background:rgba(55,214,168,.09);
+    border:1px solid rgba(55,214,168,.28);border-radius:100px;padding:4px 8px}
+
+  footer{margin-top:20px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;color:var(--dim);font-size:11.5px}
+  .lg{display:inline-flex;align-items:center;gap:7px}
+  .sw{width:20px;height:3px;border-radius:2px}
+  .sw.e{background:linear-gradient(90deg,var(--earth),#37d6a8)}
+  .sw.l{background:var(--clay)}
+  footer b{color:var(--fg);font-weight:600}
+  @media (max-width:920px){.board{grid-template-columns:1fr;gap:14px}.mini{display:none}canvas#wire{display:none}}
+  @media (prefers-reduced-motion:reduce){.live .d{animation:none}}
+</style>
+</head>
+<body>
+<div class="stage">
+  <header class="top">
+    <h1>Ingestion pipeline <b>·</b> sources → StromaDB</h1>
+    <span class="live"><span class="d"></span>streaming</span>
+  </header>
+  <p class="sub">Many sources fold through two on-ramps into <b>typed facts</b> (provenance-stamped),
+    resolve into a <b>shared ontology</b> (Types + predicates), and stream into <b>StromaDB</b>, kept live by
+    incremental maintenance. Particles are data in flight. The LLM runs only at authoring time — the streaming
+    hot path is token-zero.</p>
+
+  <div class="board" id="board">
+    <canvas id="wire"></canvas>
+
+    <div class="col">
+      <div class="col-h">Sources · N</div>
+      <div class="grp">
+        <div class="grp-l">structured</div>
+        <div class="node src" id="src-postgres"><div class="t"><span class="ic">P</span>PostgreSQL</div></div>
+        <div class="node src" id="src-snowflake"><div class="t"><span class="ic">S</span>Snowflake</div></div>
+        <div class="node src" id="src-sheet"><div class="t"><span class="ic">▦</span>Spreadsheet</div></div>
+        <div class="node src" id="src-jira"><div class="t"><span class="ic clay">J</span>Jira</div></div>
+        <div class="node src" id="src-backlog"><div class="t"><span class="ic clay">B</span>Backlog</div></div>
+        <div class="node src" id="src-calendar"><div class="t"><span class="ic">◷</span>Calendar</div></div>
+      </div>
+      <div class="grp">
+        <div class="grp-l text">unstructured</div>
+        <div class="node src" id="src-confluence"><div class="t"><span class="ic txt">C</span>Confluence</div></div>
+        <div class="node src" id="src-gdocs"><div class="t"><span class="ic txt">D</span>Google Docs</div></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="col-h">Ingest · on-ramp</div>
+      <div class="node big" id="on-elt">
+        <div class="t"><span class="ic">⇉</span>ELT / CDC</div>
+        <div class="m">Airbyte · Fivetran · Debezium<br>schema + rows (delegated)</div>
+        <span class="tag zero">token-zero</span>
+      </div>
+      <div class="node big" id="on-llm" style="margin-top:20px">
+        <div class="t"><span class="ic txt">✦</span>LLM extract</div>
+        <div class="m">text → typed facts<br>extraction pattern (confirm once)</div>
+        <span class="tag llm">LLM ×1 / doc-type</span>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="col-h">Contract</div>
+      <div class="node big" id="facts">
+        <div class="t"><span class="ic">◆</span>Typed facts</div>
+        <div class="m">the only unit (Fact model)<br>provenance-stamped (source / derived)</div>
+        <span class="tag llm">mapping LLM ×1 / source</span>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="col-h">Graph model · Types</div>
+      <div class="node big" id="onto">
+        <div class="t"><span class="ic">◎</span><span>Shared ontology</span></div>
+        <div class="m">Types + predicates · entity resolution · as-of · post-authz</div>
+        <div class="types">
+          <div class="ty"><span class="tn">Person</span><span class="prov"><i class="p-e">P</i><i class="p-c">J</i><i class="p-t">C</i><i class="p-e">◷</i></span></div>
+          <div class="ty"><span class="tn">Project</span><span class="prov"><i class="p-e">P</i><i class="p-c">J</i><i class="p-c">B</i></span></div>
+          <div class="ty"><span class="tn">Document</span><span class="prov"><i class="p-t">C</i><i class="p-t">D</i></span></div>
+          <div class="ty"><span class="tn">Event</span><span class="prov"><i class="p-e">◷</i><i class="p-c">J</i></span></div>
+          <div class="ty"><span class="tn">Task</span><span class="prov"><i class="p-c">J</i><i class="p-c">B</i></span></div>
+        </div>
+        <div class="nn">one Type ← many sources / one source → many Types = <b>N:N</b> (provenance keeps origin)</div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="col-h">Engine · output</div>
+      <div class="node stroma" id="stroma">
+        <div class="t"><span class="ic">◈</span><span>Strom<b>aDB</b></span></div>
+        <div class="m">no-LLM · real-time knowledge graph</div>
+        <div class="mini"><canvas id="graphcv"></canvas></div>
+        <div class="pills"><span>IVM</span><span>live query</span><span>rkyv</span></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span class="lg"><span class="sw e"></span> <b>data</b> (streaming · token-zero)</span>
+    <span class="lg"><span class="sw l"></span> <b>LLM</b> (authoring only · once)</span>
+    <span class="lg">Particle rate = continuous ingest. StromaDB updates incrementally on each arrival.</span>
+  </footer>
+</div>
+
+<script>
+// theme sync with the wizard (same localStorage key)
+function resolvedDark(){ const t=localStorage.getItem('vesicle-theme')||'auto';
+  return t==='dark' || (t==='auto' && matchMedia('(prefers-color-scheme: dark)').matches); }
+function applyTheme(){ document.documentElement.dataset.theme = resolvedDark() ? 'dark' : 'light'; }
+applyTheme();
+addEventListener('storage', (e)=>{ if(e.key==='vesicle-theme'){ applyTheme(); colors(); } });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ()=>{ applyTheme(); colors(); });
+
+const board = document.getElementById('board');
+const cv = document.getElementById('wire'); const ctx = cv.getContext('2d');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const EDGES = [
+  ['src-postgres','on-elt','data'], ['src-snowflake','on-elt','data'], ['src-sheet','on-elt','data'],
+  ['src-jira','on-elt','data'], ['src-backlog','on-elt','data'], ['src-calendar','on-elt','data'],
+  ['src-confluence','on-llm','llm'], ['src-gdocs','on-llm','llm'],
+  ['on-elt','facts','data'], ['on-llm','facts','llm'],
+  ['facts','onto','data'], ['onto','stroma','data'],
+];
+let edges=[], stromaGlow=0, W=0,H=0,dpr=1;
+let C = {};
+function colors(){
+  const dark = resolvedDark();
+  C = dark
+    ? { edgeData:'rgba(120,190,170,.22)', edgeLLM:'rgba(208,149,90,.24)', d0:[64,192,145], d1:[55,214,168], llm:[224,170,110], blur:9, dot:2.6 }
+    : { edgeData:'rgba(47,158,115,.34)',  edgeLLM:'rgba(176,106,42,.34)', d0:[47,158,115], d1:[35,122,88],  llm:[176,106,42], blur:3, dot:2.7 };
+}
+colors();
+
+function anchors(){
+  const b = board.getBoundingClientRect();
+  edges = EDGES.map(([from,to,kind])=>{
+    const a = document.getElementById(from).getBoundingClientRect();
+    const c = document.getElementById(to).getBoundingClientRect();
+    const x1=a.right-b.left, y1=a.top-b.top+a.height/2, x2=c.left-b.left, y2=c.top-b.top+c.height/2;
+    const dx=Math.max(40,(x2-x1)*0.5);
+    return {x1,y1,x2,y2,c1x:x1+dx,c1y:y1,c2x:x2-dx,c2y:y2,kind,to,
+      parts:Array.from({length:4},(_,i)=>({t:i/4 + Math.random()*0.06}))};
+  });
+}
+function pt(e,t){ const u=1-t,a=u*u*u,b=3*u*u*t,c=3*u*t*t,d=t*t*t;
+  return [a*e.x1+b*e.c1x+c*e.c2x+d*e.x2, a*e.y1+b*e.c1y+c*e.c2y+d*e.y2]; }
+function resize(){ dpr=Math.min(devicePixelRatio||1,2); W=board.clientWidth; H=board.clientHeight;
+  cv.width=W*dpr; cv.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); anchors(); sizeGraph(); }
+addEventListener('resize', resize);
+
+function rgb(a){ return `rgb(${a[0]|0},${a[1]|0},${a[2]|0})`; }
+function dataColor(t){ return rgb([C.d0[0]+(C.d1[0]-C.d0[0])*t, C.d0[1]+(C.d1[1]-C.d0[1])*t, C.d0[2]+(C.d1[2]-C.d0[2])*t]); }
+let last=0;
+function frame(ts){
+  const dt=Math.min(0.05,(ts-last)/1000||0); last=ts;
+  ctx.clearRect(0,0,W,H);
+  for(const e of edges){ ctx.beginPath(); ctx.moveTo(e.x1,e.y1); ctx.bezierCurveTo(e.c1x,e.c1y,e.c2x,e.c2y,e.x2,e.y2);
+    ctx.strokeStyle=e.kind==='llm'?C.edgeLLM:C.edgeData; ctx.lineWidth=1.4; ctx.stroke(); }
+  const s=document.getElementById('stroma').getBoundingClientRect(), b=board.getBoundingClientRect();
+  const sx=s.left-b.left, sy=s.top-b.top+s.height/2;
+  if(stromaGlow>0.01){ const g=ctx.createRadialGradient(sx,sy,2,sx,sy,58);
+    g.addColorStop(0,`rgba(55,214,168,${0.26*stromaGlow})`); g.addColorStop(1,'rgba(55,214,168,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,58,0,7); ctx.fill(); stromaGlow*=0.94; }
+  const speed=reduce?0:0.16;
+  for(const e of edges){ for(const p of e.parts){
+    p.t += speed*dt*(e.kind==='llm'?0.8:1); if(p.t>=1) p.t-=1;
+    const [x,y]=pt(e,p.t); const col=e.kind==='llm'?rgb(C.llm):dataColor(p.t);
+    ctx.beginPath(); ctx.arc(x,y,C.dot,0,7); ctx.fillStyle=col; ctx.shadowColor=col; ctx.shadowBlur=C.blur; ctx.fill(); ctx.shadowBlur=0;
+    if(e.to==='stroma' && p.t<0.05) stromaGlow=Math.min(1,stromaGlow+0.4);
+  }}
+  requestAnimationFrame(frame);
+}
+
+const gcv=document.getElementById('graphcv'), gx=gcv.getContext('2d');
+let gnodes=[], gW=0,gH=0;
+function sizeGraph(){ const r=gcv.parentElement.getBoundingClientRect(); gW=r.width; gH=r.height;
+  gcv.width=gW*dpr; gcv.height=gH*dpr; gx.setTransform(dpr,0,0,dpr,0,0);
+  if(!gnodes.length) gnodes=Array.from({length:7},()=>({x:Math.random()*gW,y:Math.random()*gH,ph:Math.random()*6})); }
+function graphFrame(){ gx.clearRect(0,0,gW,gH);
+  gx.strokeStyle='rgba(55,214,168,.22)'; gx.lineWidth=1;
+  for(let i=0;i<gnodes.length;i++)for(let j=i+1;j<gnodes.length;j++){ if((i*3+j)%4===0){
+    gx.beginPath(); gx.moveTo(gnodes[i].x,gnodes[i].y); gx.lineTo(gnodes[j].x,gnodes[j].y); gx.stroke(); } }
+  for(const n of gnodes){ n.ph+=0.02; const pr=2.4+Math.sin(n.ph)*0.7+stromaGlow*1.6;
+    gx.beginPath(); gx.arc(n.x,n.y,pr,0,7); gx.fillStyle='#37d6a8'; gx.shadowColor='#37d6a8'; gx.shadowBlur=6+stromaGlow*8; gx.fill(); gx.shadowBlur=0; }
+  requestAnimationFrame(graphFrame);
+}
+function init(){ resize(); requestAnimationFrame(frame); requestAnimationFrame(graphFrame); }
+setTimeout(init, 60);
+</script>
+</body>
+</html>

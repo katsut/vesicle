@@ -114,6 +114,12 @@
   .tabs button:hover{color:var(--fg-dim)}
   .tabs button.on{color:var(--accent);background:color-mix(in oklab,var(--accent) 15%,transparent);border-color:color-mix(in oklab,var(--accent) 42%,transparent)}
   .tabpane{display:none} .tabpane.on{display:block}
+  /* top-level view switch: Author ⇄ Pipeline */
+  .viewtabs{display:flex;gap:6px;margin:2px 0 16px}
+  .vtab{font:600 12.5px var(--sans);letter-spacing:.02em;cursor:pointer;border:1px solid transparent;border-radius:100px;color:var(--mut);background:transparent;padding:6px 14px;transition:color .12s,background .12s,border-color .12s}
+  .vtab:hover{color:var(--fg-dim)}
+  .vtab.on{color:var(--accent);background:color-mix(in oklab,var(--accent) 15%,transparent);border-color:color-mix(in oklab,var(--accent) 42%,transparent)}
+  #pipelineView iframe{display:block;width:100%;height:calc(100vh - 150px);min-height:560px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);box-shadow:var(--bevel),var(--shadow)}
   svg.graph{display:block;width:100%;height:auto;background:radial-gradient(circle at 30% 20%,var(--panel),var(--bg-2))}
   .mapping{margin:0;padding:13px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.55;color:var(--fg);white-space:pre;overflow:auto;max-height:360px}
   .mapping .k{color:var(--ai)} .mapping .s{color:var(--accent-ink)} .mapping .add{background:var(--accent-soft);border-radius:3px}
@@ -193,6 +199,10 @@
   </div></header>
   <div class="wrap">
   <p class="tagline" data-i18n="tagline"></p>
+  <div class="viewtabs">
+    <button class="vtab on" data-view="author" data-i18n="v_author">Author</button>
+    <button class="vtab" data-view="pipeline" data-i18n="v_pipeline">Pipeline</button>
+  </div>
 
   <div class="modal-bg" id="settingsModal">
     <div class="modal" role="dialog" aria-modal="true">
@@ -221,6 +231,7 @@
     </div>
   </div>
 
+  <div id="authorView">
   <details class="srcedit" id="srcedit">
     <summary><span data-i18n="edit_source"></span> <span class="mono" id="src-tag"></span></summary>
     <div class="srcbody">
@@ -272,6 +283,8 @@
       </div>
     </aside>
   </div>
+  </div>
+  <div id="pipelineView" hidden><iframe id="pipeIframe" title="Ingestion pipeline"></iframe></div>
 </div>
 
 <script type="module">
@@ -305,7 +318,7 @@ const I18N = {
     gap_from_not_entity: "“{pred}”: couldn't be connected — its starting thing isn't one of the graph types — so it was skipped.",
     gap_source_unresolved: "“{pred}”: couldn't work out how to link “{src}”, so it was skipped.",
     gap_no_fk: "“{pred}”: couldn't find how “{src}” connects the two things, so it was skipped.",
-    settings: "Settings", logout: "Log out", signedIn: "signed in", settings_title: "Settings", settings_sub: "Theme, language, and connection.",
+    settings: "Settings", logout: "Log out", signedIn: "signed in", v_author: "Author", v_pipeline: "Pipeline", settings_title: "Settings", settings_sub: "Theme, language, and connection.",
     set_theme: "Theme", theme_light: "Light", theme_dark: "Dark", theme_auto: "Auto",
     set_lang: "Language", set_stroma: "StromaDB connection", close: "Done",
   },
@@ -334,7 +347,7 @@ const I18N = {
     gap_from_not_entity: "「{pred}」：起点が型として扱われていないため、つなげられずスキップしました。",
     gap_source_unresolved: "「{pred}」：「{src}」のつなぎ方が判別できず、スキップしました。",
     gap_no_fk: "「{pred}」：「{src}」が2つをどうつなぐか見つからず、スキップしました。",
-    settings: "設定", logout: "ログアウト", signedIn: "サインイン中", settings_title: "設定", settings_sub: "テーマ・言語・接続。",
+    settings: "設定", logout: "ログアウト", signedIn: "サインイン中", v_author: "作成", v_pipeline: "パイプライン", settings_title: "設定", settings_sub: "テーマ・言語・接続。",
     set_theme: "テーマ", theme_light: "ライト", theme_dark: "ダーク", theme_auto: "自動",
     set_lang: "言語", set_stroma: "StromaDB 接続", close: "完了",
   },
@@ -363,7 +376,7 @@ const I18N = {
     gap_from_not_entity: "「{pred}」：起点未作为类型处理，无法连接，已跳过。",
     gap_source_unresolved: "「{pred}」：无法判断如何连接「{src}」，已跳过。",
     gap_no_fk: "「{pred}」：找不到「{src}」如何连接两者，已跳过。",
-    settings: "设置", logout: "登出", signedIn: "已登录", settings_title: "设置", settings_sub: "主题、语言与连接。",
+    settings: "设置", logout: "登出", signedIn: "已登录", v_author: "编辑", v_pipeline: "管道", settings_title: "设置", settings_sub: "主题、语言与连接。",
     set_theme: "主题", theme_light: "浅色", theme_dark: "深色", theme_auto: "自动",
     set_lang: "语言", set_stroma: "StromaDB 连接", close: "完成",
   },
@@ -651,6 +664,16 @@ $("#themeBtn").onclick = () => setTheme(resolvedDark() ? "light" : "dark");
 document.querySelectorAll("#themeSeg button").forEach((b) => (b.onclick = () => setTheme(b.dataset.themeVal)));
 document.querySelectorAll("#langSeg button").forEach((b) => (b.onclick = () => setLang(b.dataset.langVal)));
 $("#logoutBtn").onclick = async () => { await fetch("/api/logout", { method: "POST" }); location.reload(); };
+
+// --- top-level view switch: Author ⇄ Pipeline (lazy-loads the pipeline iframe) ---
+let pipeLoaded = false;
+document.querySelectorAll(".vtab").forEach((b) => (b.onclick = () => {
+  document.querySelectorAll(".vtab").forEach((x) => x.classList.toggle("on", x === b));
+  const pipe = b.dataset.view === "pipeline";
+  if (pipe && !pipeLoaded) { $("#pipeIframe").src = "/pipeline.html"; pipeLoaded = true; }
+  $("#authorView").hidden = pipe;
+  $("#pipelineView").hidden = !pipe;
+}));
 
 $("#lang").onchange = (e) => setLang(e.target.value);
 $("#repropose").onclick = () => propose(true); // force a fresh LLM proposal (bypass the cache)
