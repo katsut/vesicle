@@ -108,6 +108,16 @@
   footer b{color:var(--fg);font-weight:600}
   @media (max-width:920px){.board{grid-template-columns:1fr;gap:14px}.mini{display:none}canvas#wire{display:none}}
   @media (prefers-reduced-motion:reduce){.live .d{animation:none}}
+  /* connection state: only connected sources light up; unconnected are dimmed candidates */
+  .node.src{cursor:pointer;transition:opacity .25s,filter .25s,border-color .15s}
+  .node.src[data-conn="0"]{opacity:.42;filter:grayscale(.55)}
+  .node.src[data-conn="0"]:hover{opacity:.72}
+  .node.src[data-conn="1"]:hover{border-color:color-mix(in oklab,var(--earth) 46%,var(--line))}
+  .node.src .st{margin-left:auto;flex:none;font:700 8.5px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:3px 6px;border-radius:100px}
+  .node.src[data-conn="1"] .st{color:var(--earth);background:color-mix(in oklab,var(--earth) 15%,transparent);border:1px solid color-mix(in oklab,var(--earth) 34%,transparent)}
+  .node.src[data-conn="0"] .st{color:var(--mut);background:var(--panel-2);border:1px solid var(--line)}
+  .connhint{color:var(--mut);font-size:11.5px;margin:-8px 0 16px}
+  .connhint b{color:var(--fg);font-weight:600}
 </style>
 </head>
 <body>
@@ -120,12 +130,14 @@
     resolve into a <b>shared ontology</b> (Types + predicates), and stream into <b>StromaDB</b>, kept live by
     incremental maintenance. Particles are data in flight. The LLM runs only at authoring time — the streaming
     hot path is token-zero.</p>
+  <p class="connhint"><b>Click a source to connect or disconnect it.</b> Only connected sources light up;
+    particles flow only while data is actually arriving.</p>
 
   <div class="board" id="board">
     <canvas id="wire"></canvas>
 
     <div class="col">
-      <div class="col-h">Sources · N</div>
+      <div class="col-h" id="srcCount">Sources</div>
       <div class="grp">
         <div class="grp-l">structured</div>
         <div class="node src" id="src-postgres"><div class="t"><span class="ic">P</span>PostgreSQL</div></div>
@@ -213,13 +225,48 @@ const board = document.getElementById('board');
 const cv = document.getElementById('wire'); const ctx = cv.getContext('2d');
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const EDGES = [
+// Source → on-ramp edges (tagged by source id) vs. the internal pipeline edges.
+const SRC_EDGES = [
   ['src-postgres','on-elt','data'], ['src-snowflake','on-elt','data'], ['src-sheet','on-elt','data'],
   ['src-jira','on-elt','data'], ['src-backlog','on-elt','data'], ['src-calendar','on-elt','data'],
   ['src-confluence','on-llm','llm'], ['src-gdocs','on-llm','llm'],
-  ['on-elt','facts','data'], ['on-llm','facts','llm'],
-  ['facts','onto','data'], ['onto','stroma','data'],
 ];
+const INT_EDGES = [ ['on-elt','facts','data'], ['on-llm','facts','llm'], ['facts','onto','data'], ['onto','stroma','data'] ];
+const ELT_SRC = ['src-postgres','src-snowflake','src-sheet','src-jira','src-backlog','src-calendar'];
+const DEFAULT_CONN = ['src-postgres','src-jira','src-gdocs'];
+
+// Which sources are wired up — operator-controlled, persisted. Only connected sources get a live pipe.
+let connected;
+try { const s = JSON.parse(localStorage.getItem('vesicle-connections')); connected = new Set(Array.isArray(s) ? s : DEFAULT_CONN); }
+catch { connected = new Set(DEFAULT_CONN); }
+function saveConn(){ try { localStorage.setItem('vesicle-connections', JSON.stringify([...connected])); } catch {} }
+function liveEdges(){
+  const anyELT = ELT_SRC.some(id=>connected.has(id));
+  const anyLLM = connected.has('src-confluence') || connected.has('src-gdocs');
+  const out = SRC_EDGES.filter(([f])=>connected.has(f)).slice();
+  for(const e of INT_EDGES){
+    if(e[0]==='on-elt' && !anyELT) continue;
+    if(e[0]==='on-llm' && !anyLLM) continue;
+    out.push(e);
+  }
+  return out;
+}
+function renderConn(){
+  document.querySelectorAll('.node.src').forEach(node=>{
+    const on = connected.has(node.id);
+    node.dataset.conn = on ? '1' : '0';
+    node.setAttribute('role','button');
+    node.setAttribute('aria-pressed', on ? 'true' : 'false');
+    let chip = node.querySelector('.st');
+    if(!chip){ chip=document.createElement('span'); chip.className='st'; node.querySelector('.t').appendChild(chip); }
+    chip.textContent = on ? 'connected' : 'connect';
+  });
+  const c=document.getElementById('srcCount'); if(c) c.textContent = `Sources · ${connected.size} connected`;
+}
+function toggle(node){
+  if(connected.has(node.id)) connected.delete(node.id); else connected.add(node.id);
+  saveConn(); renderConn(); anchors();
+}
 let edges=[], stromaGlow=0, W=0,H=0,dpr=1;
 let C = {};
 function colors(){
@@ -232,14 +279,15 @@ colors();
 
 function anchors(){
   const b = board.getBoundingClientRect();
-  edges = EDGES.map(([from,to,kind])=>{
-    const a = document.getElementById(from).getBoundingClientRect();
-    const c = document.getElementById(to).getBoundingClientRect();
+  edges = liveEdges().map(([from,to,kind])=>{
+    const af=document.getElementById(from), at=document.getElementById(to); if(!af||!at) return null;
+    const a = af.getBoundingClientRect();
+    const c = at.getBoundingClientRect();
     const x1=a.right-b.left, y1=a.top-b.top+a.height/2, x2=c.left-b.left, y2=c.top-b.top+c.height/2;
     const dx=Math.max(40,(x2-x1)*0.5);
     return {x1,y1,x2,y2,c1x:x1+dx,c1y:y1,c2x:x2-dx,c2y:y2,kind,to,
       parts:Array.from({length:4},(_,i)=>({t:i/4 + Math.random()*0.06}))};
-  });
+  }).filter(Boolean);
 }
 function pt(e,t){ const u=1-t,a=u*u*u,b=3*u*u*t,c=3*u*t*t,d=t*t*t;
   return [a*e.x1+b*e.c1x+c*e.c2x+d*e.x2, a*e.y1+b*e.c1y+c*e.c2y+d*e.y2]; }
@@ -261,13 +309,18 @@ function frame(ts){
   if(stromaGlow>0.01){ const g=ctx.createRadialGradient(sx,sy,2,sx,sy,58);
     g.addColorStop(0,`rgba(55,214,168,${0.26*stromaGlow})`); g.addColorStop(1,'rgba(55,214,168,0)');
     ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,58,0,7); ctx.fill(); stromaGlow*=0.94; }
-  const speed = reduce ? 0 : (reachable ? 0.10 + activity*0.55 : 0.03);
-  for(const e of edges){ for(const p of e.parts){
-    p.t += speed*dt*(e.kind==='llm'?0.8:1); if(p.t>=1) p.t-=1;
-    const [x,y]=pt(e,p.t); const col=e.kind==='llm'?rgb(C.llm):dataColor(p.t);
-    ctx.beginPath(); ctx.arc(x,y,C.dot,0,7); ctx.fillStyle=col; ctx.shadowColor=col; ctx.shadowBlur=C.blur; ctx.fill(); ctx.shadowBlur=0;
-    if(e.to==='stroma' && p.t<0.05) stromaGlow=Math.min(1,stromaGlow+0.4);
-  }}
+  // Particles travel ONLY while data is actually arriving (the engine's write head rising); a
+  // connected-but-idle pipe shows its wire with no moving dots.
+  const flowing = reachable && !reduce && activity > 0.05;
+  if(flowing){
+    const speed = 0.10 + activity*0.55;
+    for(const e of edges){ for(const p of e.parts){
+      p.t += speed*dt*(e.kind==='llm'?0.8:1); if(p.t>=1) p.t-=1;
+      const [x,y]=pt(e,p.t); const col=e.kind==='llm'?rgb(C.llm):dataColor(p.t);
+      ctx.beginPath(); ctx.arc(x,y,C.dot,0,7); ctx.fillStyle=col; ctx.shadowColor=col; ctx.shadowBlur=C.blur; ctx.fill(); ctx.shadowBlur=0;
+      if(e.to==='stroma' && p.t<0.05) stromaGlow=Math.min(1,stromaGlow+0.4);
+    }}
+  }
   requestAnimationFrame(frame);
 }
 
@@ -288,7 +341,7 @@ function graphFrame(){ gx.clearRect(0,0,gW,gH);
 function updateStatus(){
   const badge=document.getElementById('liveBadge'), txt=document.getElementById('liveTxt'),
         lc=document.getElementById('liveCount'), st=document.getElementById('stroma');
-  txt.textContent = reachable ? (activity>0.12 ? 'ingesting' : 'streaming') : 'offline';
+  txt.textContent = reachable ? (activity>0.1 ? 'ingesting' : 'idle') : 'offline';
   badge.classList.toggle('off', !reachable);
   st.style.opacity = reachable ? '' : '.5';
   lc.textContent = reachable ? `${factCount} facts · ${nodeCount} nodes` : 'StromaDB unreachable';
@@ -307,7 +360,11 @@ async function poll(){
   }catch{ reachable=false; }
   updateStatus();
 }
-function init(){ resize(); requestAnimationFrame(frame); requestAnimationFrame(graphFrame); poll(); setInterval(poll, 1500); }
+function init(){
+  renderConn();
+  document.querySelectorAll('.node.src').forEach(n=>n.addEventListener('click', ()=>toggle(n)));
+  resize(); requestAnimationFrame(frame); requestAnimationFrame(graphFrame); poll(); setInterval(poll, 1500);
+}
 setTimeout(init, 60);
 </script>
 </body>
