@@ -129,4 +129,28 @@ export class Stroma {
     }
     return out;
   }
+
+  /** conformance(rule) — evaluate a declared rule in the engine (deterministic, no LLM) into a
+   *  per-subject verdict: OK | ABSENT | MISMATCH ({kind: stale|wrong}) | NOT_APPLICABLE. */
+  async conformance(rule: Record<string, unknown>): Promise<EngineVerdict[]> {
+    const j = await this.query({ op: "conformance", rule });
+    return (j.verdicts as EngineVerdict[]) ?? [];
+  }
+
+  /** point(subject, predicate) current text value (name/title etc.), or null. */
+  async pointText(subject: number, predicate: string): Promise<string | null> {
+    const j = await this.query({ op: "point", subject, predicate });
+    const one = j.one as { text?: string } | null;
+    return one?.text ?? null;
+  }
+}
+
+/** A conformance verdict as the engine returns it (node-valued required/actual in the first cut). */
+export interface EngineVerdict {
+  subject: number;
+  verdict: "OK" | "ABSENT" | "MISMATCH" | "NOT_APPLICABLE";
+  kind?: "stale" | "wrong" | null;
+  required?: { node?: number } | null;
+  actual?: { node?: number } | null;
+  as_of?: number | null;
 }

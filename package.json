@@ -9,6 +9,10 @@
     "serve:open": "VESICLE_NO_AUTH=1 tsx src/server.ts",
     "extract-slice": "tsx src/cli/extract-slice.ts",
     "drive-slice": "tsx src/cli/drive-slice.ts",
+    "backlog": "tsx src/cli/backlog-slice.ts",
+    "conformance": "tsx src/cli/conformance.ts",
+    "resolve": "tsx src/cli/resolve.ts",
+    "slice": "tsx src/cli/slice.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

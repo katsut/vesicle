@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Conformance review — Vesicle</title>
+<style>
+  :root {
+    --bg:#0b0f17; --panel:#131a28; --line:#1e2838; --fg:#e9edf4; --muted:#8492a8; --dim:#5b677c;
+    --mint:#37d6a8; --amber:#e9b24c; --rose:#e8686e; --violet:#8e7be8;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:860px;margin:0 auto;padding:32px 22px 80px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  h1{font-size:20px;margin:0;letter-spacing:-.01em}
+  h1 .sub{display:block;font-size:12px;color:var(--dim);font-family:var(--mono);letter-spacing:.04em;margin-top:3px;font-weight:400}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:8px 14px}
+  button:hover{border-color:var(--mint)}
+  button.primary{background:var(--mint);color:#052018;border-color:var(--mint);font-weight:600}
+  .summary{font-family:var(--mono);font-size:13px;color:var(--muted);margin:22px 0 14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  .summary b{color:var(--fg)}
+  .gap{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:10px 0}
+  .gap.reviewed{border-color:rgba(55,214,168,.35)}
+  .gaphead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .badge{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:6px;border:1px solid}
+  .b-missing{color:var(--violet);border-color:var(--violet)}
+  .b-stale{color:var(--amber);border-color:var(--amber)}
+  .b-wrong{color:var(--rose);border-color:var(--rose)}
+  .name{font-weight:600}
+  .why{color:var(--muted);font-size:13.5px;margin-top:8px}
+  .reviewed-line{color:var(--mint);font-size:13px;margin-top:10px}
+  .reviewed-line .who{color:var(--dim)}
+  .resolve{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px}
+  select,input{font:inherit;background:#0e1420;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+  input{flex:1;min-width:180px}
+  .foot{color:var(--dim);font-size:12.5px;margin-top:22px;line-height:1.7}
+  .empty{color:var(--mint);padding:20px 0}
+  .err{color:var(--rose);font-family:var(--mono);font-size:13px;margin:16px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Conformance review<span class="sub">deterministic engine verdict · human review overlay</span></h1>
+    <button class="primary" id="rerun">Re-run review</button>
+  </header>
+  <div id="out"><div class="summary">loading…</div></div>
+  <div class="foot">
+    The engine evaluates a declared decision-authority rule deterministically (no LLM) and surfaces the gaps.
+    Your decision on each gap is written back as a human-asserted fact — the flywheel's first turn, and the
+    labelled data a later model learns from.
+  </div>
+</div>
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const DECISIONS = ["confirmed","waived","data-gap"];
+
+function badge(g){
+  if (g.verdict === "ABSENT") return `<span class="badge b-missing">missing</span>`;
+  const k = g.kind === "stale" ? "b-stale" : "b-wrong";
+  return `<span class="badge ${k}">wrong: ${esc(g.kind||"")}</span>`;
+}
+
+function gapCard(g){
+  const reviewed = !!g.human;
+  const resolve = reviewed ? "" : `
+    <div class="resolve">
+      <select data-issue="${g.subject}">${DECISIONS.map((d)=>`<option value="${d}">${d}</option>`).join("")}</select>
+      <input placeholder="note (why)" data-note="${g.subject}" />
+      <button data-record="${g.subject}">Record</button>
+    </div>`;
+  const rline = reviewed ? `<div class="reviewed-line">✓ reviewed: <b>${esc(g.human.decision)}</b>
+    <span class="who">${g.human.reviewer?`by ${esc(g.human.reviewer)}`:""}${g.human.note?` — "${esc(g.human.note)}"`:""}</span></div>` : "";
+  return `<div class="gap${reviewed?" reviewed":""}">
+    <div class="gaphead">${badge(g)}<span class="name">${esc(g.name)}</span></div>
+    ${reviewed?"":`<div class="why">${esc(g.why)}</div>`}
+    ${rline}${resolve}</div>`;
+}
+
+async function load(){
+  const out = $("#out");
+  out.innerHTML = `<div class="summary">evaluating…</div>`;
+  let r;
+  try { r = await fetch("/api/conformance", {method:"POST", headers:{"content-type":"application/json"}, body:"{}"}).then((x)=>x.json()); }
+  catch(e){ out.innerHTML = `<div class="err">request failed: ${esc(e.message||e)}</div>`; return; }
+  if (r.error){ out.innerHTML = `<div class="err">${esc(r.error)}</div>`; return; }
+  const summary = `<div class="summary">evaluated <b>${r.total}</b> · <b>${r.ok}</b> OK · <b>${r.notApplicable}</b> n/a · <b>${r.gaps.length}</b> gap(s) — <b>${r.open}</b> open, <b>${r.resolved}</b> reviewed</div>`;
+  const body = r.gaps.length === 0 ? `<div class="empty">✅ no gaps — every in-scope subject is properly resolved.</div>` : r.gaps.map(gapCard).join("");
+  out.innerHTML = summary + body;
+  out.querySelectorAll("[data-record]").forEach((b)=> b.addEventListener("click", ()=> record(+b.dataset.record)));
+}
+
+async function record(issue){
+  const decision = $(`select[data-issue="${issue}"]`).value;
+  const note = $(`input[data-note="${issue}"]`).value.trim();
+  const btn = $(`button[data-record="${issue}"]`); btn.disabled = true; btn.textContent = "…";
+  try {
+    const j = await fetch("/api/conformance/resolve", {method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({issue, decision, note, reviewer: "web"})}).then((x)=>x.json());
+    if (j.error) throw new Error(j.error);
+    await load();
+  } catch(e){ btn.disabled = false; btn.textContent = "Record"; alert("failed: " + (e.message||e)); }
+}
+
+$("#rerun").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

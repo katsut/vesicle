@@ -10,6 +10,7 @@
 // to the built-in sample. The LLM proposal is the core path; the browser just confirms it.
 // Needs a stroma-serve reachable at STROMA_URL for /api/apply.
 
+import "./env.ts"; // load ./.env before anything reads process.env
 import express from "express";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -23,7 +24,22 @@ import type { TransformResult } from "./transform.ts";
 import { Stroma } from "./stroma.ts";
 import { planPayoff, runPayoff } from "./payoff.ts";
 import { checkDerivedPath, evaluateDerived } from "./deriveEval.ts";
+import { review, type Rule } from "./conformance.ts";
+import { recordReview, type Decision } from "./review.ts";
+import { backlogEventToBatch, type BacklogWebhook } from "./backlog.ts";
+import { authorizeUrl, exchangeCode } from "./backlog-oauth.ts";
+import { listProjects, registerWebhook, listActivities, ISSUE_ACTIVITY_TYPES } from "./backlog-api.ts";
 import type { DerivedRelation, Mapping } from "./types.ts";
+
+// Default decision-authority policy: a release must be approved by the manager of the assignee's
+// department, as of the approval time. Authored here; the engine evaluates it deterministically.
+const DEFAULT_CONFORMANCE_RULE: Rule = {
+  subject_type: "Issue",
+  scope: { predicate: "issue-type", equals: "release" },
+  required: { hops: [{ predicate: "assigned-to" }, { predicate: "member-of" }, { predicate: "manager-of", as_of: "approved-at" }] },
+  actual: "approved-by",
+  absent_when: { predicate: "status", equals: "released" },
+};
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUB = resolve(HERE, "../public");
@@ -141,6 +157,33 @@ app.post("/login", (req, res) => {
   res.redirect("/");
 });
 
+// Streaming ingest from a Backlog webhook (public: Backlog carries no session). Backlog POSTs an
+// activity the moment it happens; we map it to provenance-stamped typed facts and APPEND them to the
+// live graph — no reset, this is a stream, not a load. Set BACKLOG_WEBHOOK_SECRET to require ?secret=…
+// (recommended; Backlog itself sends no signature).
+app.post("/api/webhook/backlog", async (req, res) => {
+  const secret = process.env.BACKLOG_WEBHOOK_SECRET;
+  if (secret && req.query.secret !== secret) return res.status(401).json({ error: "bad webhook secret" });
+  try {
+    const ev = req.body as BacklogWebhook | undefined;
+    if (!ev || typeof ev.type !== "number" || !ev.content || !ev.project) {
+      return res.status(400).json({ error: "not a Backlog webhook activity" });
+    }
+    const batch = backlogEventToBatch(ev);
+    if (!batch.ndjson) return res.json({ ok: true, kind: batch.kind, facts: 0, note: batch.summary });
+    const db = new Stroma();
+    if (!(await db.health())) {
+      return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
+    }
+    await db.ensureAuthed();
+    const stats = await db.ingest(batch.ndjson);
+    console.log(`  /api/webhook/backlog → ${batch.kind}: ${batch.summary}`);
+    res.json({ ok: true, kind: batch.kind, summary: batch.summary, facts: batch.factCount, stats });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
 // auth gate: everything below requires a session
 app.use((req, res, next) => {
   if (authed(req)) return next();
@@ -172,8 +215,215 @@ app.get("/api/stroma-stats", async (_req, res) => {
   }
 });
 
+// --- Backlog OAuth connect flow: sign in, pick a project, install the webhook (OAuth only, no API keys)
+const backlogPending = new Map<string, { host: string; state: string }>(); // vesicle session → in-flight OAuth
+const backlogConn = new Map<string, { host: string; token: string; refresh: string; exp: number }>(); // → connected
+
+function publicUrl(): string {
+  const u = process.env.PUBLIC_URL;
+  if (!u) throw new Error("set PUBLIC_URL — this server's public https base (for the OAuth redirect + the webhook URL)");
+  return u.replace(/\/$/, "");
+}
+function oauthApp(): { clientId: string; clientSecret: string; redirectUri: string } {
+  const clientId = process.env.BACKLOG_CLIENT_ID;
+  const clientSecret = process.env.BACKLOG_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new Error("set BACKLOG_CLIENT_ID and BACKLOG_CLIENT_SECRET (from the Backlog OAuth app)");
+  return { clientId, clientSecret, redirectUri: `${publicUrl()}/api/backlog/oauth/callback` };
+}
+function backlogConf(req: express.Request): { host: string; token: string } {
+  const t = cookieToken(req);
+  const c = t ? backlogConn.get(t) : undefined;
+  if (!c) throw new Error("not connected to Backlog — sign in first");
+  return { host: c.host, token: c.token };
+}
+
+app.get("/api/backlog/status", (req, res) => {
+  const t = cookieToken(req);
+  const c = t ? backlogConn.get(t) : undefined;
+  res.json({ connected: !!c, host: c?.host ?? null });
+});
+
+app.get("/api/backlog/oauth/start", (req, res) => {
+  try {
+    const host = String(req.query.host ?? "").trim().toLowerCase();
+    if (!/^[a-z0-9-]+\.(backlog\.(com|jp)|backlogtool\.com)$/.test(host)) {
+      return res.status(400).json({ error: "host must be a Backlog space, e.g. example.backlog.com" });
+    }
+    const t = cookieToken(req);
+    if (!t) return res.status(401).json({ error: "no session" });
+    const oa = oauthApp();
+    const state = randomBytes(16).toString("hex");
+    backlogPending.set(t, { host, state });
+    res.redirect(authorizeUrl(host, oa.clientId, oa.redirectUri, state));
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+app.get("/api/backlog/oauth/callback", async (req, res) => {
+  try {
+    const t = cookieToken(req);
+    const pending = t ? backlogPending.get(t) : undefined;
+    if (!t || !pending) return res.status(400).type("html").send("<p>OAuth session expired — start again from <a href='/connect'>/connect</a>.</p>");
+    if (String(req.query.state ?? "") !== pending.state) return res.status(400).send("state mismatch");
+    const code = String(req.query.code ?? "");
+    if (!code) return res.status(400).send("no authorization code");
+    const oa = oauthApp();
+    const tok = await exchangeCode(pending.host, { clientId: oa.clientId, clientSecret: oa.clientSecret, code, redirectUri: oa.redirectUri });
+    backlogConn.set(t, { host: pending.host, token: tok.access_token, refresh: tok.refresh_token, exp: Date.now() + tok.expires_in * 1000 });
+    backlogPending.delete(t);
+    res.redirect("/connect?connected=1");
+  } catch (e) {
+    res.status(500).type("html").send(`<p>OAuth failed: ${(e as Error).message}</p>`);
+  }
+});
+
+app.post("/api/backlog/disconnect", (req, res) => {
+  const t = cookieToken(req);
+  if (t) backlogConn.delete(t);
+  res.json({ ok: true });
+});
+
+app.get("/api/backlog/projects", async (req, res) => {
+  try {
+    const projects = await listProjects(backlogConf(req));
+    res.json({ projects: projects.map((p) => ({ id: p.id, projectKey: p.projectKey, name: p.name })) });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+app.post("/api/backlog/webhook", async (req, res) => {
+  try {
+    const project = String(req.body?.project ?? "").trim();
+    if (!project) return res.status(400).json({ error: "missing project" });
+    const secret = process.env.BACKLOG_WEBHOOK_SECRET;
+    const hookUrl = `${publicUrl()}/api/webhook/backlog${secret ? `?secret=${encodeURIComponent(secret)}` : ""}`;
+    const hook = await registerWebhook(
+      { project, hookUrl, name: "Vesicle stream", description: "issue events → StromaDB", activityTypeIds: ISSUE_ACTIVITY_TYPES },
+      backlogConf(req),
+    );
+    res.json({ ok: true, id: hook.id, hookUrl: hook.hookUrl, activityTypeIds: hook.activityTypeIds });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+// Polling ingest (pull) — the tunnel-free path: the server periodically fetches recent Backlog
+// activities over OAuth (outbound only) and streams them into StromaDB. No public URL needed, unlike
+// the webhook (push). Same `backlogEventToBatch` mapping consumes both shapes.
+const backlogPollers = new Map<string, { project: string; timer: ReturnType<typeof setInterval>; lastId: number; ingested: number; busy: boolean; error: string | null }>();
+const POLL_MS = Number(process.env.BACKLOG_POLL_MS ?? 15000);
+
+async function pollOnce(sessionTok: string): Promise<void> {
+  const st = backlogPollers.get(sessionTok);
+  const c = backlogConn.get(sessionTok);
+  if (!st || !c || st.busy) return;
+  st.busy = true;
+  try {
+    const acts = await listActivities(
+      { host: c.host, token: c.token },
+      { project: st.project, minId: st.lastId || undefined, count: 100, order: "asc", activityTypeIds: ISSUE_ACTIVITY_TYPES },
+    );
+    if (acts.length) {
+      const db = new Stroma();
+      await db.ensureAuthed();
+      for (const a of acts) {
+        const batch = backlogEventToBatch(a as unknown as BacklogWebhook);
+        if (batch.ndjson) {
+          await db.ingest(batch.ndjson);
+          st.ingested += batch.factCount;
+        }
+        if (a.id > st.lastId) st.lastId = a.id;
+      }
+      console.log(`  backlog poll (${st.project}): ${acts.length} new activities → lastId ${st.lastId}, ${st.ingested} facts total`);
+    }
+    st.error = null;
+  } catch (e) {
+    st.error = (e as Error).message;
+    console.log(`  backlog poll error: ${st.error}`);
+  } finally {
+    st.busy = false;
+  }
+}
+
+app.post("/api/backlog/poll/start", (req, res) => {
+  try {
+    const t = cookieToken(req);
+    const c = t ? backlogConn.get(t) : undefined;
+    if (!t || !c) return res.status(400).json({ error: "not connected to Backlog" });
+    const project = String(req.body?.project ?? "").trim();
+    if (!project) return res.status(400).json({ error: "missing project" });
+    const existing = backlogPollers.get(t);
+    if (existing) clearInterval(existing.timer);
+    backlogPollers.set(t, { project, timer: setInterval(() => void pollOnce(t), POLL_MS), lastId: 0, ingested: 0, busy: false, error: null });
+    void pollOnce(t); // kick off immediately
+    res.json({ ok: true, project, intervalMs: POLL_MS });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+app.post("/api/backlog/poll/stop", (req, res) => {
+  const t = cookieToken(req);
+  const st = t ? backlogPollers.get(t) : undefined;
+  if (st && t) {
+    clearInterval(st.timer);
+    backlogPollers.delete(t);
+  }
+  res.json({ ok: true });
+});
+
+app.get("/api/backlog/poll/status", (req, res) => {
+  const t = cookieToken(req);
+  const st = t ? backlogPollers.get(t) : undefined;
+  res.json({ running: !!st, project: st?.project ?? null, ingested: st?.ingested ?? 0, lastId: st?.lastId ?? 0, error: st?.error ?? null });
+});
+
+// POST /api/conformance → { rule? } evaluate the declared decision-authority rule in the engine
+// (deterministic, no LLM) and return a human-reviewable report of the gaps (ABSENT + MISMATCH).
+app.post("/api/conformance", async (req, res) => {
+  try {
+    const rule = (req.body?.rule as Rule | undefined) ?? DEFAULT_CONFORMANCE_RULE;
+    const db = new Stroma();
+    if (!(await db.health())) {
+      return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
+    }
+    await db.ensureAuthed();
+    const report = await review(db, rule);
+    res.json(report);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// POST /api/conformance/resolve → { issue, decision, reviewer?, note? } record a human decision on a
+// gap as human-asserted facts (the flywheel's first turn).
+app.post("/api/conformance/resolve", async (req, res) => {
+  try {
+    const issue = Number(req.body?.issue);
+    const decision = req.body?.decision as Decision | undefined;
+    if (!Number.isInteger(issue) || !["confirmed", "waived", "data-gap"].includes(decision ?? "")) {
+      return res.status(400).json({ error: "expected { issue:int, decision: confirmed|waived|data-gap, reviewer?, note? }" });
+    }
+    const reviewer = (req.body?.reviewer as string | undefined) ?? "reviewer";
+    const note = req.body?.note as string | undefined;
+    const db = new Stroma();
+    if (!(await db.health())) {
+      return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
+    }
+    await db.ensureAuthed();
+    await recordReview(db, { issue, decision: decision as Decision, reviewer, note });
+    res.json({ ok: true, issue, decision, reviewer });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
 app.use(express.static(PUB));
 app.get("/", (_req, res) => res.sendFile(resolve(PUB, "wizard.html")));
+app.get("/conformance", (_req, res) => res.sendFile(resolve(PUB, "conformance.html")));
+app.get("/connect", (_req, res) => res.sendFile(resolve(PUB, "connect-backlog.html")));
 
 // list registered sources (built-in + plugins) for the picker
 app.get("/api/sources", (_req, res) => {

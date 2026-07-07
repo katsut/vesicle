@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vesicle — connect Backlog</title>
+<style>
+  :root{
+    --bg:#f2efe6; --panel:#fffdf7; --panel-2:#f6f1e7; --line:#e5dfd1; --line-2:#d4ccba;
+    --fg:#211d15; --dim:#574f40; --mut:#8b8371; --earth:#2f9e73; --earth-2:#237a58; --clay:#b06a2a;
+    --r:12px; --r-sm:8px; --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){:root{
+    --bg:#13181a; --panel:#1d2427; --panel-2:#222a2d; --line:#2b3437; --line-2:#3a4548;
+    --fg:#e9ede9; --dim:#a9b3ab; --mut:#6f7a72; --earth:#40c091; --earth-2:#35a67c; --clay:#d0955a;
+  }}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);font:14.5px/1.55 var(--sans);
+    -webkit-font-smoothing:antialiased;display:flex;justify-content:center;padding:40px 18px}
+  .card{width:100%;max-width:560px}
+  h1{font-size:19px;font-weight:640;margin:0 0 4px}
+  h1 b{color:var(--earth)}
+  .sub{color:var(--dim);font-size:13px;margin:0 0 22px}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 18px 16px;margin-bottom:14px}
+  .step[hidden]{display:none}
+  .step h2{font-size:13px;font-weight:640;margin:0 0 3px;display:flex;align-items:center;gap:8px}
+  .n{width:20px;height:20px;border-radius:50%;background:color-mix(in oklab,var(--earth) 18%,transparent);
+    color:var(--earth);font:700 11px/20px var(--mono);text-align:center;flex:none}
+  .step .h{color:var(--mut);font-size:12.5px;margin:0 0 13px}
+  label{display:block;font:600 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:0 0 6px}
+  input,select{width:100%;font:inherit;color:var(--fg);background:var(--panel-2);border:1px solid var(--line-2);
+    border-radius:var(--r-sm);padding:9px 11px}
+  input:focus,select:focus{outline:none;border-color:var(--earth)}
+  .btn{margin-top:12px;font:inherit;font-weight:640;border:1px solid transparent;border-radius:var(--r-sm);
+    padding:10px 15px;cursor:pointer;background:var(--earth);color:#fff}
+  .btn:hover{background:var(--earth-2)}
+  .btn.ghost{background:transparent;border-color:var(--line-2);color:var(--fg)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .conn{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);margin-bottom:12px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--earth)}
+  .row{display:flex;gap:10px;align-items:flex-end}
+  .row>div{flex:1}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .actions .btn{margin-top:0}
+  .pollstat{margin-top:12px;font:12.5px/1.5 var(--mono);color:var(--earth-2);display:flex;align-items:center;gap:8px}
+  .pollstat .dot{animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .msg{margin-top:12px;font:12.5px/1.5 var(--mono);white-space:pre-wrap;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--line)}
+  .msg.ok{color:var(--earth-2);background:color-mix(in oklab,var(--earth) 8%,transparent);border-color:color-mix(in oklab,var(--earth) 30%,transparent)}
+  .msg.err{color:var(--clay);background:color-mix(in oklab,var(--clay) 8%,transparent);border-color:color-mix(in oklab,var(--clay) 30%,transparent)}
+  code{font:12px var(--mono);color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Connect <b>Backlog</b></h1>
+  <p class="sub">Sign in with Backlog, pick a project, and install the webhook that streams its issue events into StromaDB. OAuth only — no API keys.</p>
+
+  <div class="step" id="step1">
+    <h2><span class="n">1</span> Sign in</h2>
+    <p class="h">Enter your Backlog space, then authorize Vesicle on Backlog's consent screen.</p>
+    <form id="connectForm" action="/api/backlog/oauth/start" method="get">
+      <label for="host">Backlog space</label>
+      <input id="host" name="host" placeholder="example.backlog.com" autocomplete="off" spellcheck="false" required>
+      <button class="btn" type="submit">Connect with Backlog</button>
+    </form>
+  </div>
+
+  <div class="step" id="step2" hidden>
+    <h2><span class="n">2</span> Stream a project</h2>
+    <div class="conn"><span class="dot"></span> Connected to <b id="connHost"></b> · <a href="#" id="disconnect">disconnect</a></div>
+    <p class="h"><b>Poll</b> streams issue events over OAuth with no public URL — recommended. <b>Webhook</b> is push and needs a public URL Backlog can reach.</p>
+    <label for="project">Project</label>
+    <select id="project"></select>
+    <div class="actions">
+      <button class="btn" id="startPoll">Start streaming (poll)</button>
+      <button class="btn ghost" id="stopPoll" hidden>Stop</button>
+      <button class="btn ghost" id="install" title="needs a public URL Backlog can reach">Install webhook</button>
+    </div>
+    <div class="pollstat" id="pollstat" hidden></div>
+    <div id="msg"></div>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+async function j(url, opts){ const r = await fetch(url, opts); const t = await r.text(); let b; try{ b = JSON.parse(t); }catch{ b = { error: t }; } if(!r.ok) throw new Error(b.error || r.status); return b; }
+
+async function refresh(){
+  const s = await j("/api/backlog/status");
+  $("#step1").hidden = s.connected;
+  $("#step2").hidden = !s.connected;
+  if(s.connected){ $("#connHost").textContent = s.host; await loadProjects(); await pollStatus(); }
+}
+let pollTimer = null;
+async function pollStatus(){
+  try{
+    const s = await j("/api/backlog/poll/status");
+    $("#stopPoll").hidden = !s.running;
+    const ps = $("#pollstat");
+    if(s.running){
+      ps.hidden = false;
+      ps.innerHTML = `<span class="dot"></span> streaming ${s.project} · ${s.ingested} facts ingested${s.error ? ` · error: ${s.error}` : ""}`;
+      if(!pollTimer) pollTimer = setInterval(pollStatus, 4000);
+    } else {
+      ps.hidden = true;
+      if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+    }
+  }catch{}
+}
+async function loadProjects(){
+  const sel = $("#project"); sel.innerHTML = "";
+  try{
+    const { projects } = await j("/api/backlog/projects");
+    for(const p of projects){ const o = document.createElement("option"); o.value = p.projectKey; o.textContent = `${p.name} (${p.projectKey})`; sel.appendChild(o); }
+    if(!projects.length){ const o = document.createElement("option"); o.textContent = "(no projects)"; sel.appendChild(o); }
+  }catch(e){ show("err", e.message); }
+}
+function show(kind, text){ const m = $("#msg"); m.className = "msg " + kind; m.textContent = text; }
+
+$("#install").addEventListener("click", async () => {
+  const project = $("#project").value;
+  if(!project) return;
+  $("#install").disabled = true;
+  try{
+    const r = await j("/api/backlog/webhook", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project }) });
+    show("ok", `Webhook #${r.id} installed on ${project}.\nDelivering to ${r.hookUrl}\nActivity types: ${r.activityTypeIds.join(", ")} (created / updated / commented)`);
+  }catch(e){ show("err", e.message); }
+  finally{ $("#install").disabled = false; }
+});
+$("#startPoll").addEventListener("click", async () => {
+  const project = $("#project").value;
+  if(!project) return;
+  $("#startPoll").disabled = true;
+  try{
+    await j("/api/backlog/poll/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project }) });
+    show("ok", `Streaming ${project} — polling Backlog over OAuth every few seconds (no public URL needed).`);
+    await pollStatus();
+  }catch(e){ show("err", e.message); }
+  finally{ $("#startPoll").disabled = false; }
+});
+$("#stopPoll").addEventListener("click", async () => {
+  try{ await j("/api/backlog/poll/stop", { method: "POST" }); await pollStatus(); show("ok", "Stopped streaming."); }
+  catch(e){ show("err", e.message); }
+});
+$("#disconnect").addEventListener("click", async (e) => { e.preventDefault(); await j("/api/backlog/disconnect", { method: "POST" }); await refresh(); });
+
+refresh().catch((e) => show("err", e.message));
+</script>
+</body>
+</html>
