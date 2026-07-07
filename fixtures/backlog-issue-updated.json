@@ -1,0 +1,13 @@
+{
+  "type": 2,
+  "project": { "id": 100, "projectKey": "PROJ", "name": "Example Project" },
+  "content": {
+    "id": 5001,
+    "key_id": 42,
+    "summary": "Login fails on Safari",
+    "status": { "id": 3, "name": "In Progress" },
+    "assignee": { "id": 200, "name": "Alice", "mailAddress": "alice@example.com" }
+  },
+  "createdUser": { "id": 200, "name": "Alice", "mailAddress": "alice@example.com" },
+  "created": "2026-07-02T14:30:00Z"
+}
