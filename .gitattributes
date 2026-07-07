@@ -1,0 +1,5 @@
+# The app is TypeScript; the public/*.html files are the UI shell (large inline CSS/JS +
+# translation dictionaries). Keep them out of GitHub's language stats so the repo reads as
+# TypeScript rather than HTML.
+public/*.html linguist-detectable=false
+docs-sample/** linguist-vendored
