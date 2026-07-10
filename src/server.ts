@@ -2,8 +2,13 @@
 //   GET  /               → the confirm wizard (public/wizard.html)
 //   GET  /api/sources    → registered sources (built-in + sources/*.json plugins) for the picker
 //   GET  /api/source     → one source's schema DDL + sample data (?id=<id>; defaults to built-in)
-//   POST /api/propose    → { schema? } parse schema + LLM proposes ontology → { tables, mapping }
-//   POST /api/apply      → { mapping, schema?, data? } transform → ingest → payoff on the live graph
+//   POST /api/propose    → { schema? } parse schema + LLM proposes a mapping against the shared type
+//                          layer → { tables, mapping, model, additions }
+//   GET  /api/model      → { model, mappings } — the shared type layer + every per-source mapping
+//   POST /api/model/confirm → { sourceId, mapping, additions? } append new declarations to the shared
+//                          layer (conflicting redefinitions rejected) + save the per-source mapping
+//   POST /api/apply      → { mapping | sourceId, schema?, data? } transform → ingest → payoff on the
+//                          live graph (sourceId applies the saved mapping composed with the layer)
 //
 // Sources are pluggable: drop a sources/<id>.json ({label,schema,data}) to register one, no code
 // change. The source is also editable in the browser; if a request omits schema/data it falls back
@@ -31,6 +36,7 @@ import { StromaSink, type IngestStats } from "./etl/sink.ts";
 import { repairLateArrivals, type Repair } from "./etl/guard.ts";
 import { BacklogSource } from "./etl/source.ts";
 import { loadConfig, recordRun, saveConfig, type PipelineDef } from "./etl/store.ts";
+import { additionsOf, appendToModel, bindingsOf, composeMapping, conflictsOf, type ModelAdditions } from "./model.ts";
 import type { DerivedRelation, Mapping } from "./types.ts";
 
 // Default decision-authority policy: a release must be approved by the manager of the assignee's
@@ -536,16 +542,60 @@ app.get("/api/source", (req, res) => {
   res.json({ id: s.id, label: s.label, schema: s.schema, data: s.data });
 });
 
-// Cache proposals by schema text: an LLM call is one-time per source (not per page-load / re-open /
-// language switch). "Re-propose" (fresh=true) forces a new call. Keeps token spend minimal.
-const proposeCache = new Map<string, { tables: unknown; mapping: unknown }>();
+// The model split, read side: the shared type layer (ONE per deployment) + every per-source mapping.
+app.get("/api/model", (_req, res) => {
+  const cfg = loadConfig();
+  res.json({ model: cfg.model, mappings: cfg.mappings });
+});
+
+// Confirm a proposal into the two persisted layers: append the mapping's NEW types/predicates to the
+// shared layer and save the per-source bindings under sourceId. A redefinition of an existing
+// predicate (different cardinality/domain/range) is rejected — cardinality is load-bearing in the
+// engine, so the shared layer never silently changes meaning under other sources. `additions`, when
+// sent, is the explicit approval list: a new declaration the mapping needs but the list omits is an
+// error rather than a silent append.
+app.post("/api/model/confirm", (req, res) => {
+  const sourceId = typeof req.body?.sourceId === "string" ? req.body.sourceId.trim() : "";
+  const mapping = req.body?.mapping as Mapping | undefined;
+  if (!sourceId) return res.status(400).json({ error: "missing sourceId" });
+  if (!mapping?.entity_types || !Array.isArray(mapping.predicates)) {
+    return res.status(400).json({ error: "missing mapping (entity_types + predicates)" });
+  }
+  const conflicts = conflictsOf(loadConfig().model, mapping);
+  if (conflicts.length) return res.status(409).json({ error: `rejected — ${conflicts.join("; ")}`, conflicts });
+  const needed = additionsOf(loadConfig().model, mapping);
+  const approved = req.body?.additions as Partial<ModelAdditions> | undefined;
+  if (approved) {
+    const missing = [
+      ...needed.types.filter((t) => !(approved.types ?? []).includes(t)).map((t) => `type "${t}"`),
+      ...needed.predicates.filter((p) => !(approved.predicates ?? []).includes(p)).map((p) => `predicate "${p}"`),
+    ];
+    if (missing.length) {
+      return res.status(400).json({ error: `mapping needs new declarations not in additions: ${missing.join(", ")}`, needed });
+    }
+  }
+  let added: ModelAdditions = { types: [], predicates: [] };
+  const cfg = saveConfig((c) => {
+    added = appendToModel(c.model, mapping);
+    c.mappings[sourceId] = bindingsOf(mapping);
+  });
+  console.log(`  /api/model/confirm → "${sourceId}": +${added.types.length} types, +${added.predicates.length} predicates`);
+  res.json({ ok: true, added, model: cfg.model, mapping: cfg.mappings[sourceId] });
+});
+
+// Cache proposals by (shared layer + schema text): an LLM call is one-time per source (not per
+// page-load / re-open / language switch), and a shared-layer change invalidates every cached proposal
+// (it was proposed against the old layer). "Re-propose" (fresh=true) forces a new call.
+const proposeCache = new Map<string, { tables: unknown; mapping: Mapping; model: unknown; additions: ModelAdditions }>();
 
 app.post("/api/propose", async (req, res) => {
   try {
     const schemaText = (req.body?.schema as string | undefined) ?? defaultSource().schema;
     const fresh = req.body?.fresh === true;
+    const model = loadConfig().model;
+    const cacheKey = `${JSON.stringify(model)}\n${schemaText}`;
     if (!fresh) {
-      const hit = proposeCache.get(schemaText);
+      const hit = proposeCache.get(cacheKey);
       if (hit) {
         console.log("  /api/propose → cache hit (no LLM call)");
         return res.json(hit);
@@ -554,12 +604,16 @@ app.post("/api/propose", async (req, res) => {
     const schema = parseSchema(schemaText);
     if (!schema.tables.length) return res.status(400).json({ error: "no tables found in the schema DDL" });
     console.log(`  /api/propose → LLM call${fresh ? " (forced re-propose)" : ""}`);
-    const mapping = await proposeMapping(schema);
+    const mapping = await proposeMapping(schema, model);
+    // additive over the wizard's { tables, mapping } contract: the layer proposed against, and which
+    // of the proposal's declarations would be NEW to it (diffed here, not taken on the LLM's word)
     const result = {
       tables: schema.tables.map((t) => ({ name: t.name, isJoin: t.isJoin, joins: t.joins })),
       mapping,
+      model,
+      additions: additionsOf(model, mapping),
     };
-    proposeCache.set(schemaText, result);
+    proposeCache.set(cacheKey, result);
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
@@ -568,12 +622,23 @@ app.post("/api/propose", async (req, res) => {
 
 app.post("/api/apply", async (req, res) => {
   try {
-    const mapping = req.body?.mapping as Mapping | undefined;
+    // An inline mapping (the wizard flow) is used as-is and NOT persisted — persisting is the explicit
+    // /api/model/confirm. When the request instead names a sourceId with a saved mapping, that mapping
+    // is composed with the shared layer and applied.
+    const sourceId = typeof req.body?.sourceId === "string" ? req.body.sourceId.trim() : "";
+    let mapping = req.body?.mapping as Mapping | undefined;
+    if (!mapping && sourceId) {
+      const cfg = loadConfig();
+      const saved = cfg.mappings[sourceId];
+      if (!saved) return res.status(400).json({ error: `no saved mapping for source "${sourceId}" — confirm one via /api/model/confirm` });
+      mapping = composeMapping(cfg.model, saved);
+    }
     if (!mapping) return res.status(400).json({ error: "missing mapping" });
-    const schema = parseSchema((req.body?.schema as string | undefined) ?? defaultSource().schema);
+    const fallback = sourceId ? sourceById(sourceId) : defaultSource();
+    const schema = parseSchema((req.body?.schema as string | undefined) ?? fallback.schema);
     let data: Rows;
     try {
-      data = JSON.parse((req.body?.data as string | undefined) ?? defaultSource().data) as Rows;
+      data = JSON.parse((req.body?.data as string | undefined) ?? fallback.data) as Rows;
     } catch (e) {
       return res.status(400).json({ error: `sample data is not valid JSON: ${(e as Error).message}` });
     }

@@ -1,11 +1,13 @@
 // Persisted connector config — var/config.json. Runtime state, not code: the sink URL, one connection
-// per source (OAuth tokens live here, so var/ is git-ignored), pipeline definitions, and their run
-// history. Loaded once into an in-memory cache; every save writes a tmp file and renames it into
-// place, so a crash never leaves a torn file.
+// per source (OAuth tokens live here, so var/ is git-ignored), the model split (ONE shared type layer
+// + one mapping per source), pipeline definitions, and their run history. Loaded once into an
+// in-memory cache; every save writes a tmp file and renames it into place, so a crash never leaves a
+// torn file.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { seedModel, type SharedModel, type SourceMapping } from "../model.ts";
 
 /** The saved Backlog connection: the OAuth grant plus the last project picked for streaming. */
 export interface BacklogConnection {
@@ -57,6 +59,10 @@ export interface PipelineRun {
 export interface ConnectorConfig {
   sink: { url?: string };
   sources: { backlog?: BacklogConnection };
+  /** the shared type layer — ONE per deployment; seeded from the Backlog declarations when empty */
+  model: SharedModel;
+  /** per-source mappings (bindings onto the shared layer), keyed by source id */
+  mappings: Record<string, SourceMapping>;
   pipelines: PipelineDef[];
   /** run history, most-recent first, capped at RUNS_CAP */
   runs: PipelineRun[];
@@ -84,7 +90,18 @@ export function loadConfig(): ConnectorConfig {
       console.warn(`config store: could not read ${FILE}: ${(e as Error).message} — starting empty`);
     }
   }
-  cache = { sink: raw.sink ?? {}, sources: raw.sources ?? {}, pipelines: raw.pipelines ?? [], runs: raw.runs ?? [] };
+  // An empty shared layer is seeded with the Backlog source's static declarations, so the shared
+  // Person (etc.) exists for other sources to map onto from the first propose.
+  const model: SharedModel = { types: raw.model?.types ?? [], predicates: raw.model?.predicates ?? [] };
+  const seeded = model.types.length || model.predicates.length ? model : seedModel();
+  cache = {
+    sink: raw.sink ?? {},
+    sources: raw.sources ?? {},
+    model: seeded,
+    mappings: raw.mappings ?? {},
+    pipelines: raw.pipelines ?? [],
+    runs: raw.runs ?? [],
+  };
   return cache;
 }
 
