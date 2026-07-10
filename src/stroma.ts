@@ -110,6 +110,18 @@ export class Stroma {
     return one?.node ?? null;
   }
 
+  /** point(subject, predicate) full response for a one-cardinality predicate: the value in effect
+   *  ({node} or {text}, null when absent), the winning version's valid_from, and its provenance —
+   *  for writers that compare event times before ingesting (the late-arrival guard). */
+  async pointRecord(subject: number, predicate: string): Promise<PointRecord> {
+    const j = await this.query({ op: "point", subject, predicate });
+    return {
+      one: (j.one as PointRecord["one"]) ?? null,
+      valid_from: typeof j.valid_from === "number" ? j.valid_from : undefined,
+      provenance: typeof j.provenance === "string" ? j.provenance : undefined,
+    };
+  }
+
   /** point(subject, predicate) valid-time as-of `at` for a one-cardinality predicate → the node in
    *  effect at that instant, or null (e.g. the membership has ended). */
   async pointAsOf(subject: number, predicate: string, at: number): Promise<number | null> {
@@ -143,6 +155,14 @@ export class Stroma {
     const one = j.one as { text?: string } | null;
     return one?.text ?? null;
   }
+}
+
+/** The full `point` response for a one-cardinality predicate. `valid_from` is the winning version's
+ *  (present when the engine reports it for a current value). */
+export interface PointRecord {
+  one: { node?: number; text?: string } | null;
+  valid_from?: number;
+  provenance?: string;
 }
 
 /** A conformance verdict as the engine returns it (node-valued required/actual in the first cut). */
