@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vesicle — sink</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiByeD0iNiIgZmlsbD0iI2YyZWZlNiIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjciIGZpbGw9InVybCgjZykiLz48Y2lyY2xlIGN4PSI5LjYiIGN5PSI5LjMiIHI9IjIiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9Ii41NSIvPjxkZWZzPjxyYWRpYWxHcmFkaWVudCBpZD0iZyIgY3g9IjM0JSIgY3k9IjMyJSIgcj0iNzUlIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMzZmJmYTIiLz48c3RvcCBvZmZzZXQ9Ii41NSIgc3RvcC1jb2xvcj0iIzJmOWU3MyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzIzN2E1OCIvPjwvcmFkaWFsR3JhZGllbnQ+PC9kZWZzPjwvc3ZnPg==">
+<script defer src="/nav.js"></script>
+<style>
+  :root {
+    /* Shared StromaDB design-system tokens — EARTH theme (see wizard.html) */
+    --bg:#f2efe6; --bg-2:#eae5d9; --panel:#fffdf7; --panel-2:#f6f1e7;
+    --line:#e5dfd1; --line-2:#d4ccba; --fg:#211d15; --fg-dim:#574f40; --mut:#8b8371;
+    --accent:#2f9e73; --accent-2:#237a58; --accent-ink:#ffffff;
+    --r:10px; --r-sm:7px;
+    --shadow:0 1px 0 rgba(0,0,0,.02), 0 14px 30px -16px rgba(60,50,30,.22);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.6);
+    --panel-grad:linear-gradient(163deg,color-mix(in oklab,var(--panel) 86%,var(--bg-2) 14%),var(--panel));
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+    --good:#237a58; --bad:#a23b3b;
+  }
+  html[data-theme="dark"]{
+    --bg:#13181a; --bg-2:#181e20; --panel:#1d2427; --panel-2:#222a2d;
+    --line:#2b3437; --line-2:#3a4548; --fg:#e9ede9; --fg-dim:#a9b3ab; --mut:#6f7a72;
+    --accent:#40c091; --accent-2:#35a67c; --accent-ink:#eaf6f0;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 16px 34px -14px rgba(0,0,0,.62);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.05);
+    --good:#40c091; --bad:#e0707e;
+  }
+  html[data-theme="dark"] body{background:
+    radial-gradient(1200px 620px at 84% -12%, #17332b 0%, transparent 58%),
+    radial-gradient(1000px 560px at -10% 108%, #16272f 0%, transparent 55%),
+    radial-gradient(1100px 520px at 50% 118%, #241d13 0%, transparent 62%),
+    var(--bg);background-attachment:fixed}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1300px 640px at 82% -14%, #f4e4b6 0%, transparent 56%),
+      linear-gradient(180deg, #f5f3ec 0%, transparent 40%),
+      radial-gradient(900px 520px at -8% 104%, #dbe8d1 0%, transparent 56%),
+      radial-gradient(1300px 560px at 50% 116%, #ebd9b3 0%, transparent 60%),
+      var(--bg);
+    background-attachment:fixed}
+  .wrap{max-width:860px;margin:0 auto;padding:6px 14px 60px}
+  .topbar{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,color-mix(in oklab,var(--bg) 90%,transparent),color-mix(in oklab,var(--bg) 62%,transparent));backdrop-filter:blur(11px);border-bottom:1px solid var(--line);margin-bottom:18px}
+  .topbar-inner{max-width:1160px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px 14px;flex-wrap:wrap}
+  .mark{display:inline-flex;align-items:center;gap:10px;font-weight:640;letter-spacing:.2px;font-size:16px}
+  .mark .dot{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 34% 32%,#3fbfa2 0%,var(--accent) 46%,var(--accent-2) 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 1px 3px rgba(14,110,92,.4)}
+  .mark small{font-weight:500;color:var(--mut);font-size:12px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font:500 11.5px/1 var(--mono);color:var(--fg-dim);background:var(--panel);border:1px solid var(--line);border-radius:100px;padding:6px 10px;white-space:nowrap}
+  .pill b{color:var(--fg);font-weight:600}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px color-mix(in oklab,var(--accent) 80%,transparent);flex:none}
+  .pill.off{color:var(--mut)} .pill.off .dot{background:var(--mut);box-shadow:none}
+  .pill[hidden]{display:none}
+  .spacer{flex:1}
+  .ctls{display:flex;align-items:center;gap:8px}
+  .ctl{background:linear-gradient(180deg,color-mix(in oklab,var(--panel) 84%,var(--fg-dim) 16%),color-mix(in oklab,var(--panel) 96%,#000 4%));border:1px solid var(--line-2);color:var(--fg-dim);border-radius:var(--r-sm);min-width:34px;height:34px;padding:0 9px;font:inherit;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 2px 6px -3px rgba(0,0,0,.3);transition:color .15s,border-color .15s,filter .15s}
+  .ctl:hover{color:var(--fg);border-color:var(--accent);filter:brightness(1.05)}
+  .ctl.select{padding:0}
+  .ctl select{appearance:none;background:transparent;border:none;color:inherit;font:inherit;font-size:12.5px;padding:0 10px;height:34px;cursor:pointer}
+  .tagline{color:var(--fg-dim);font-size:13.5px;margin:2px 0 18px;max-width:76ch}
+  .tagline b{color:var(--fg);font-weight:600}
+  .streamhead{display:flex;align-items:center;gap:10px;margin:22px 2px 12px}
+  .streamhead h2{font-size:15px;margin:0;letter-spacing:-.01em}
+  .streamhead .bar{flex:1;height:1px;background:var(--line)}
+  .card{background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);padding:16px 17px;box-shadow:var(--bevel),var(--shadow)}
+  .engrow{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+  .engrow .big{width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px color-mix(in oklab,var(--accent) 70%,transparent);flex:none}
+  .engrow.off .big{background:var(--bad);box-shadow:0 0 10px color-mix(in oklab,var(--bad) 55%,transparent)}
+  .engrow b{font-size:15px}
+  .engrow .state{font:600 12px/1 var(--mono);color:var(--accent-2);padding:4px 9px;border-radius:100px;background:color-mix(in oklab,var(--accent) 13%,transparent);border:1px solid color-mix(in oklab,var(--accent) 34%,transparent)}
+  .engrow.off .state{color:var(--bad);background:color-mix(in oklab,var(--bad) 10%,transparent);border-color:color-mix(in oklab,var(--bad) 34%,transparent)}
+  .url{font:12px var(--mono);color:var(--mut);word-break:break-all;margin-top:7px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:15px}
+  .tile{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px}
+  .tile .v{font:640 24px/1.1 var(--mono);letter-spacing:-.02em}
+  .tile .l{color:var(--mut);font-size:11.5px;margin-top:5px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+  details.raw{margin-top:13px}
+  details.raw summary{cursor:pointer;font-size:12.5px;color:var(--mut);font-weight:600}
+  details.raw pre{margin:9px 0 0;font:11.5px/1.55 var(--mono);color:var(--fg-dim);background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 13px;overflow-x:auto}
+  .err{color:var(--bad);font-size:13px;background:color-mix(in oklab,var(--bad) 10%,var(--panel));border:1px solid color-mix(in oklab,var(--bad) 34%,var(--line));border-radius:var(--r-sm);padding:10px 12px;margin:10px 0 0}
+  .err a{color:inherit}
+  .loading{color:var(--mut);font-size:13px;padding:4px 0}
+
+  /* the danger boundary — visually unmistakable */
+  .danger{margin-top:26px;border:1.5px solid color-mix(in oklab,var(--bad) 55%,var(--line));border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+  .danger-head{display:flex;align-items:center;gap:9px;padding:11px 16px;background:color-mix(in oklab,var(--bad) 12%,var(--panel));border-bottom:1px solid color-mix(in oklab,var(--bad) 40%,var(--line));color:var(--bad);font-weight:700;font-size:13px;letter-spacing:.05em;text-transform:uppercase}
+  .danger-head .warn{font-size:15px}
+  .danger-body{padding:16px 17px;background:var(--panel-grad)}
+  .danger-body h3{margin:0 0 4px;font-size:14.5px}
+  .danger-body p{color:var(--fg-dim);font-size:13px;margin:0 0 13px;max-width:70ch}
+  .confirm-row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+  .confirm-row input{flex:1;min-width:170px;font:600 13.5px var(--mono);letter-spacing:.12em;color:var(--fg);background:var(--panel-2);border:1px solid color-mix(in oklab,var(--bad) 38%,var(--line-2));border-radius:var(--r-sm);padding:10px 12px}
+  .confirm-row input:focus{outline:none;border-color:var(--bad);box-shadow:0 0 0 3px color-mix(in oklab,var(--bad) 22%,transparent)}
+  .btn-danger{font:inherit;font-weight:700;font-size:13.5px;border:none;border-radius:var(--r-sm);padding:10px 16px;cursor:pointer;color:#fff;background:linear-gradient(180deg,color-mix(in oklab,var(--bad) 92%,#fff 8%),var(--bad));box-shadow:inset 0 1px 0 rgba(255,255,255,.25);transition:filter .15s}
+  .btn-danger:hover{filter:brightness(1.07)}
+  .btn-danger:disabled{opacity:.45;cursor:default;filter:grayscale(.4)}
+  .confirm-hint{color:var(--mut);font-size:12.5px;margin:9px 0 0}
+  .confirm-hint b{color:var(--bad);font-family:var(--mono);letter-spacing:.1em}
+  .reset-note{color:var(--mut);font-size:12px;margin:11px 0 0;border-top:1px dashed color-mix(in oklab,var(--bad) 26%,var(--line));padding-top:10px}
+  .msg{margin-top:12px;font:12.5px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--line)}
+  .msg.ok{color:var(--good);background:color-mix(in oklab,var(--accent) 8%,transparent);border-color:color-mix(in oklab,var(--accent) 30%,transparent)}
+  .msg.err{color:var(--bad);background:color-mix(in oklab,var(--bad) 8%,transparent);border-color:color-mix(in oklab,var(--bad) 30%,transparent)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+  <span class="mark"><span class="dot"></span>Vesicle <small data-i18n="nav_sink">sink</small></span>
+  <div id="vnav"></div>
+  <span class="pill off" id="connPill" title="StromaDB"><span class="dot"></span><span id="connText">stroma</span></span>
+  <span class="spacer"></span>
+  <div class="ctls">
+    <span class="pill" id="userPill" hidden><span data-i18n="signedIn">signed in</span> <b id="userName"></b></span>
+    <span class="ctl select"><select id="lang" aria-label="language">
+      <option value="en">EN</option><option value="ja">日本語</option><option value="zh">中文</option>
+    </select></span>
+    <button class="ctl" id="themeBtn" title="theme" aria-label="theme">☀</button>
+    <button class="ctl" id="logoutBtn" title="log out" aria-label="log out" data-i18n-title="logout">⏻</button>
+  </div>
+</div></header>
+
+<div class="wrap">
+  <p class="tagline" data-i18n="tagline"></p>
+
+  <div class="streamhead" style="margin-top:2px"><h2 data-i18n="conn_head"></h2><div class="bar"></div></div>
+  <div class="card">
+    <div id="engine"><div class="loading" data-i18n="loading"></div></div>
+    <div class="stats">
+      <div class="tile"><div class="v" id="factsV">—</div><div class="l" data-i18n="facts_label"></div></div>
+      <div class="tile"><div class="v" id="nodesV">—</div><div class="l" data-i18n="nodes_label"></div></div>
+    </div>
+    <details class="raw"><summary data-i18n="raw_stats"></summary><pre id="rawStats">—</pre></details>
+  </div>
+
+  <section class="danger" aria-labelledby="dangerTitle">
+    <div class="danger-head" id="dangerTitle"><span class="warn">⚠</span><span data-i18n="danger_head"></span></div>
+    <div class="danger-body">
+      <h3 data-i18n="reset_title"></h3>
+      <p data-i18n="reset_desc"></p>
+      <div class="confirm-row">
+        <input id="confirmInput" placeholder="RESET" autocomplete="off" spellcheck="false" aria-label="type RESET to confirm">
+        <button class="btn-danger" id="resetBtn" disabled data-i18n="reset_btn"></button>
+      </div>
+      <p class="confirm-hint" data-i18n="reset_confirm_hint"></p>
+      <div id="resetMsg"></div>
+      <p class="reset-note" data-i18n="reset_note"></p>
+    </div>
+  </section>
+</div>
+
+<script type="module">
+const $ = (s, r=document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// --- i18n (EN / JA / ZH) ---
+const I18N = {
+  en: {
+    nav_sources: "Sources", nav_sink: "Sink", nav_pipelines: "Pipelines", nav_model: "Model",
+    signedIn: "signed in", logout: "Log out", loading: "Loading…",
+    tagline: "The destination engine this workspace writes to — <b>StromaDB</b>. Every pipeline appends here; nothing else writes.",
+    conn_head: "Engine connection",
+    conn_ok: "connected", conn_bad: "unreachable",
+    facts_label: "Facts (durable head)", nodes_label: "Nodes",
+    raw_stats: "Raw engine counters",
+    stats_unreachable: "Engine unreachable — counters unavailable.",
+    danger_head: "Danger zone",
+    reset_title: "Reset database",
+    reset_desc: "Deletes every fact and node in the engine database. Running pipelines are not stopped — they will keep appending into the emptied graph. This cannot be undone.",
+    reset_btn: "Reset database", resetting: "Resetting…",
+    reset_confirm_hint: "Type <b>RESET</b> to enable the button.",
+    reset_ok: "Engine database cleared.",
+    reset_note: "The engine honors this only when started with --allow-reset; otherwise the request is rejected.",
+    err_unauthorized: "Sign-in required — <a href=\"/login\">sign in</a> and reload.",
+    err_request: "Request failed: {e}",
+  },
+  ja: {
+    nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル",
+    signedIn: "サインイン中", logout: "ログアウト", loading: "読み込み中…",
+    tagline: "このワークスペースの書き込み先エンジン — <b>StromaDB</b>。すべてのパイプラインはここに追記し、それ以外は書き込みません。",
+    conn_head: "エンジン接続",
+    conn_ok: "接続済み", conn_bad: "到達不能",
+    facts_label: "ファクト（durable head）", nodes_label: "ノード",
+    raw_stats: "エンジンカウンター（生値）",
+    stats_unreachable: "エンジンに到達できません — カウンターは取得できません。",
+    danger_head: "危険な操作",
+    reset_title: "データベースをリセット",
+    reset_desc: "エンジンデータベース内のすべてのファクトとノードを削除します。稼働中のパイプラインは停止されず、空になったグラフに追記を続けます。この操作は取り消せません。",
+    reset_btn: "データベースをリセット", resetting: "リセット中…",
+    reset_confirm_hint: "ボタンを有効にするには <b>RESET</b> と入力してください。",
+    reset_ok: "エンジンデータベースを消去しました。",
+    reset_note: "エンジンが --allow-reset 付きで起動されている場合のみ実行されます。それ以外はリクエストは拒否されます。",
+    err_unauthorized: "サインインが必要です — <a href=\"/login\">サインイン</a>して再読み込みしてください。",
+    err_request: "リクエストに失敗しました: {e}",
+  },
+  zh: {
+    nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型",
+    signedIn: "已登录", logout: "登出", loading: "加载中…",
+    tagline: "本工作区写入的目标引擎 — <b>StromaDB</b>。所有管道都在此追加数据；此外没有其他写入方。",
+    conn_head: "引擎连接",
+    conn_ok: "已连接", conn_bad: "无法访问",
+    facts_label: "事实（durable head）", nodes_label: "节点",
+    raw_stats: "引擎原始计数",
+    stats_unreachable: "无法访问引擎 — 计数不可用。",
+    danger_head: "危险区域",
+    reset_title: "重置数据库",
+    reset_desc: "删除引擎数据库中的所有事实和节点。运行中的管道不会停止 — 它们将继续向清空后的图谱追加数据。此操作无法撤销。",
+    reset_btn: "重置数据库", resetting: "正在重置…",
+    reset_confirm_hint: "输入 <b>RESET</b> 以启用按钮。",
+    reset_ok: "引擎数据库已清空。",
+    reset_note: "仅当引擎以 --allow-reset 启动时才会执行；否则请求将被拒绝。",
+    err_unauthorized: "需要登录 — 请<a href=\"/login\">登录</a>后重新加载。",
+    err_request: "请求失败: {e}",
+  },
+};
+let LANG = "en";
+function t(k, v) {
+  let s = (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k;
+  if (v) for (const [key, val] of Object.entries(v)) s = s.replaceAll("{" + key + "}", String(val));
+  return s;
+}
+function applyLang() {
+  document.querySelectorAll("[data-i18n]").forEach((e) => { e.innerHTML = t(e.getAttribute("data-i18n")); });
+  document.querySelectorAll("[data-i18n-title]").forEach((e) => { e.title = t(e.getAttribute("data-i18n-title")); });
+  renderEngine();
+}
+
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
+let THEME = store.get("vesicle-theme") || "auto";
+const media = window.matchMedia("(prefers-color-scheme: dark)");
+function resolvedDark() { return THEME === "dark" || (THEME === "auto" && media.matches); }
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", resolvedDark() ? "dark" : "light");
+  $("#themeBtn").textContent = resolvedDark() ? "☾" : "☀";
+}
+function setTheme(v) { THEME = v; store.set("vesicle-theme", v); applyTheme(); }
+media.addEventListener?.("change", () => { if (THEME === "auto") applyTheme(); });
+$("#themeBtn").onclick = () => setTheme(resolvedDark() ? "light" : "dark");
+function setLang(l) { LANG = l; store.set("vesicle-lang", l); $("#lang").value = l; applyLang(); }
+LANG = store.get("vesicle-lang") || "en";
+$("#lang").onchange = (e) => setLang(e.target.value);
+$("#logoutBtn").onclick = async () => { await fetch("/api/logout", { method: "POST" }); location.reload(); };
+
+async function jf(url, opts) {
+  const r = await fetch(url, opts);
+  const text = await r.text();
+  let b; try { b = JSON.parse(text); } catch { b = { error: text || r.statusText }; }
+  if (!r.ok) { const e = new Error(b.error || `HTTP ${r.status}`); e.status = r.status; throw e; }
+  return b;
+}
+
+// --- engine connection: /api/status (reachability + url) + /api/stroma-stats (counters) ---
+const ENG = { loaded: false, error: null, stroma: false, url: "" };
+function renderEngine() {
+  const root = $("#engine"); if (!root) return;
+  if (!ENG.loaded && !ENG.error) { root.innerHTML = `<div class="loading">${t("loading")}</div>`; return; }
+  if (ENG.error) {
+    root.innerHTML = `<div class="err">${ENG.error.status === 401 ? t("err_unauthorized") : esc(t("err_request", { e: ENG.error.message }))}</div>`;
+    return;
+  }
+  root.innerHTML = `
+    <div class="engrow ${ENG.stroma ? "" : "off"}">
+      <span class="big"></span><b>StromaDB</b>
+      <span class="state">${ENG.stroma ? t("conn_ok") : t("conn_bad")}</span>
+    </div>
+    <div class="url">${esc(ENG.url)}</div>`;
+}
+async function refreshStatus() {
+  try {
+    const s = await jf("/api/status");
+    ENG.loaded = true; ENG.error = null; ENG.stroma = !!s.stroma; ENG.url = s.url ?? "";
+    $("#connPill").classList.toggle("off", !s.stroma);
+    $("#connPill").title = `StromaDB · ${s.url}`;
+    $("#connText").textContent = s.stroma ? "stroma" : "stroma offline";
+    if (s.auth && s.user) { $("#userName").textContent = s.user; $("#userPill").hidden = false; }
+  } catch (e) {
+    ENG.loaded = false; ENG.error = e;
+    $("#connPill").classList.add("off"); $("#connText").textContent = "stroma offline";
+  }
+  renderEngine();
+}
+async function refreshStats() {
+  try {
+    const j = await jf("/api/stroma-stats");
+    if (!j.reachable) {
+      $("#factsV").textContent = "—"; $("#nodesV").textContent = "—";
+      $("#rawStats").textContent = t("stats_unreachable");
+      return;
+    }
+    const st = j.stats ?? {};
+    $("#factsV").textContent = String(st.facts?.durable_head ?? 0);
+    $("#nodesV").textContent = String(st.schema?.nodes ?? 0);
+    $("#rawStats").textContent = JSON.stringify(st, null, 2);
+  } catch (e) {
+    $("#factsV").textContent = "—"; $("#nodesV").textContent = "—";
+    $("#rawStats").textContent = e.status === 401 ? "unauthorized" : t("err_request", { e: e.message });
+  }
+}
+
+// --- reset: typed confirmation gates the destructive call ---
+const CONFIRM_WORD = "RESET"; // literal in every language — compared verbatim
+const input = $("#confirmInput"), btn = $("#resetBtn");
+input.addEventListener("input", () => { btn.disabled = input.value.trim() !== CONFIRM_WORD; });
+btn.addEventListener("click", async () => {
+  if (input.value.trim() !== CONFIRM_WORD) return;
+  btn.disabled = true; btn.textContent = t("resetting");
+  const m = $("#resetMsg");
+  try {
+    await jf("/api/sink/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: true }) });
+    m.innerHTML = `<div class="msg ok">${t("reset_ok")}</div>`;
+    input.value = "";
+    await refreshStats();
+  } catch (e) {
+    m.innerHTML = `<div class="msg err">${e.status === 401 ? t("err_unauthorized") : esc(t("err_request", { e: e.message }))}</div>`;
+  } finally {
+    btn.textContent = t("reset_btn");
+    btn.disabled = input.value.trim() !== CONFIRM_WORD;
+  }
+});
+
+applyTheme();
+setLang(LANG);
+refreshStatus();
+refreshStats();
+setInterval(() => { refreshStatus(); refreshStats(); }, 4000);
+</script>
+</body>
+</html>

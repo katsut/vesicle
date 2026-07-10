@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vesicle — pipelines</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiByeD0iNiIgZmlsbD0iI2YyZWZlNiIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjciIGZpbGw9InVybCgjZykiLz48Y2lyY2xlIGN4PSI5LjYiIGN5PSI5LjMiIHI9IjIiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9Ii41NSIvPjxkZWZzPjxyYWRpYWxHcmFkaWVudCBpZD0iZyIgY3g9IjM0JSIgY3k9IjMyJSIgcj0iNzUlIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMzZmJmYTIiLz48c3RvcCBvZmZzZXQ9Ii41NSIgc3RvcC1jb2xvcj0iIzJmOWU3MyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzIzN2E1OCIvPjwvcmFkaWFsR3JhZGllbnQ+PC9kZWZzPjwvc3ZnPg==">
+<script defer src="/nav.js"></script>
+<style>
+  :root {
+    /* Shared StromaDB design-system tokens — EARTH theme (see wizard.html) */
+    --bg:#f2efe6; --bg-2:#eae5d9; --panel:#fffdf7; --panel-2:#f6f1e7;
+    --line:#e5dfd1; --line-2:#d4ccba; --fg:#211d15; --fg-dim:#574f40; --mut:#8b8371;
+    --accent:#2f9e73; --accent-2:#237a58; --accent-ink:#ffffff;
+    --r:10px; --r-sm:7px;
+    --shadow:0 1px 0 rgba(0,0,0,.02), 0 14px 30px -16px rgba(60,50,30,.22);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.6);
+    --panel-grad:linear-gradient(163deg,color-mix(in oklab,var(--panel) 86%,var(--bg-2) 14%),var(--panel));
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+    --clay:#b06a2a; --good:#237a58; --bad:#a23b3b;
+  }
+  html[data-theme="dark"]{
+    --bg:#13181a; --bg-2:#181e20; --panel:#1d2427; --panel-2:#222a2d;
+    --line:#2b3437; --line-2:#3a4548; --fg:#e9ede9; --fg-dim:#a9b3ab; --mut:#6f7a72;
+    --accent:#40c091; --accent-2:#35a67c; --accent-ink:#eaf6f0;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 16px 34px -14px rgba(0,0,0,.62);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.05);
+    --clay:#d0955a; --good:#40c091; --bad:#e0707e;
+  }
+  html[data-theme="dark"] body{background:
+    radial-gradient(1200px 620px at 84% -12%, #17332b 0%, transparent 58%),
+    radial-gradient(1000px 560px at -10% 108%, #16272f 0%, transparent 55%),
+    radial-gradient(1100px 520px at 50% 118%, #241d13 0%, transparent 62%),
+    var(--bg);background-attachment:fixed}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1300px 640px at 82% -14%, #f4e4b6 0%, transparent 56%),
+      linear-gradient(180deg, #f5f3ec 0%, transparent 40%),
+      radial-gradient(900px 520px at -8% 104%, #dbe8d1 0%, transparent 56%),
+      radial-gradient(1300px 560px at 50% 116%, #ebd9b3 0%, transparent 60%),
+      var(--bg);
+    background-attachment:fixed}
+  .wrap{max-width:1400px;margin:0 auto;padding:6px 14px 60px}
+  .topbar{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,color-mix(in oklab,var(--bg) 90%,transparent),color-mix(in oklab,var(--bg) 62%,transparent));backdrop-filter:blur(11px);border-bottom:1px solid var(--line);margin-bottom:18px}
+  .topbar-inner{max-width:1400px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px 14px;flex-wrap:wrap}
+  .mark{display:inline-flex;align-items:center;gap:10px;font-weight:640;letter-spacing:.2px;font-size:16px}
+  .mark .dot{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 34% 32%,#3fbfa2 0%,var(--accent) 46%,var(--accent-2) 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 1px 3px rgba(14,110,92,.4)}
+  .mark small{font-weight:500;color:var(--mut);font-size:12px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font:500 11.5px/1 var(--mono);color:var(--fg-dim);background:var(--panel);border:1px solid var(--line);border-radius:100px;padding:6px 10px;white-space:nowrap}
+  .pill b{color:var(--fg);font-weight:600}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px color-mix(in oklab,var(--accent) 80%,transparent);flex:none}
+  .pill.off{color:var(--mut)} .pill.off .dot{background:var(--mut);box-shadow:none}
+  .pill[hidden]{display:none}
+  .spacer{flex:1}
+  .ctls{display:flex;align-items:center;gap:8px}
+  .ctl{background:linear-gradient(180deg,color-mix(in oklab,var(--panel) 84%,var(--fg-dim) 16%),color-mix(in oklab,var(--panel) 96%,#000 4%));border:1px solid var(--line-2);color:var(--fg-dim);border-radius:var(--r-sm);min-width:34px;height:34px;padding:0 9px;font:inherit;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 2px 6px -3px rgba(0,0,0,.3);transition:color .15s,border-color .15s,filter .15s}
+  .ctl:hover{color:var(--fg);border-color:var(--accent);filter:brightness(1.05)}
+  .ctl.select{padding:0}
+  .ctl select{appearance:none;background:transparent;border:none;color:inherit;font:inherit;font-size:12.5px;padding:0 10px;height:34px;cursor:pointer}
+  .tagline{color:var(--fg-dim);font-size:13.5px;margin:2px 0 18px;max-width:76ch}
+  .tagline b{color:var(--fg);font-weight:600}
+  .streamhead{display:flex;align-items:center;gap:10px;margin:22px 2px 12px}
+  .streamhead h2{font-size:15px;margin:0;letter-spacing:-.01em}
+  .streamhead .bar{flex:1;height:1px;background:var(--line)}
+  .lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-items:start}
+  .card{background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;box-shadow:var(--bevel),var(--shadow)}
+  .lanehead{display:flex;align-items:center;gap:9px}
+  .lanehead b{font-size:14px}
+  .state{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:6px;font:700 9.5px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;padding:4px 9px;border-radius:100px;border:1px solid var(--line);color:var(--mut);background:var(--panel-2)}
+  .state .d{width:6px;height:6px;border-radius:50%;background:var(--mut);flex:none}
+  .state.running{color:var(--accent);background:color-mix(in oklab,var(--accent) 15%,transparent);border-color:color-mix(in oklab,var(--accent) 34%,transparent)}
+  .state.running .d{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .lanemeta{font:11.5px/1.6 var(--mono);color:var(--mut);margin-top:7px}
+  .lanemeta .scope{color:var(--fg-dim);font-weight:600}
+  .lanestats{display:flex;gap:14px;flex-wrap:wrap;margin-top:9px;font-size:12.5px;color:var(--fg-dim)}
+  .lanestats b{font-family:var(--mono);color:var(--fg)}
+  .laneerr{margin-top:9px;color:var(--bad);font:12px/1.5 var(--mono);background:color-mix(in oklab,var(--bad) 8%,transparent);border:1px solid color-mix(in oklab,var(--bad) 30%,transparent);border-radius:var(--r-sm);padding:7px 10px;word-break:break-word}
+  .empty{color:var(--mut);font-size:13px;padding:14px 2px}
+  .empty a{color:var(--accent-2);font-weight:600}
+  .tablewrap{overflow-x:auto;background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--bevel),var(--shadow)}
+  table{border-collapse:collapse;width:100%;min-width:660px;font-size:13px}
+  th{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--mut);text-align:left;padding:11px 14px;border-bottom:1px solid var(--line)}
+  td{padding:10px 14px;border-bottom:1px solid var(--line);color:var(--fg-dim);white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  td.mono{font-family:var(--mono);font-size:12px}
+  td .okres{color:var(--good);font-weight:600}
+  td .errres{color:var(--bad);font-family:var(--mono);font-size:12px;white-space:normal;word-break:break-word}
+  .kind{font:600 10px/1 var(--mono);letter-spacing:.04em;padding:3px 8px;border-radius:100px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg-dim)}
+  .kind.one-shot{color:var(--clay);background:color-mix(in oklab,var(--clay) 14%,transparent);border-color:color-mix(in oklab,var(--clay) 36%,transparent)}
+  .kind.live{color:var(--accent);background:color-mix(in oklab,var(--accent) 13%,transparent);border-color:color-mix(in oklab,var(--accent) 34%,transparent)}
+  .confcard{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .confcard .ic{flex:none;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-size:14px;background:color-mix(in oklab,var(--accent) 16%,transparent);color:var(--accent)}
+  .confcard .txt{flex:1;min-width:240px;color:var(--fg-dim);font-size:13px}
+  .confcard .txt b{color:var(--fg)}
+  .btn{font:inherit;font-weight:640;font-size:13.5px;border:1px solid transparent;border-radius:var(--r-sm);padding:9px 14px;cursor:pointer;color:var(--accent-ink);background:linear-gradient(180deg,var(--accent),var(--accent-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.3);transition:filter .15s;text-decoration:none;display:inline-block}
+  .btn:hover{filter:brightness(1.06)}
+  iframe#dag{display:block;width:100%;height:620px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);box-shadow:var(--bevel),var(--shadow)}
+  .err{color:var(--bad);font-size:13px;background:color-mix(in oklab,var(--bad) 10%,var(--panel));border:1px solid color-mix(in oklab,var(--bad) 34%,var(--line));border-radius:var(--r-sm);padding:10px 12px;margin:8px 0}
+  .err a{color:inherit}
+  .loading{color:var(--mut);font-size:13px;padding:8px 0}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}.state.running .d{animation:none}}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+  <span class="mark"><span class="dot"></span>Vesicle <small data-i18n="nav_pipelines">pipelines</small></span>
+  <div id="vnav"></div>
+  <span class="pill off" id="connPill" title="StromaDB"><span class="dot"></span><span id="connText">stroma</span></span>
+  <span class="spacer"></span>
+  <div class="ctls">
+    <span class="pill" id="userPill" hidden><span data-i18n="signedIn">signed in</span> <b id="userName"></b></span>
+    <span class="ctl select"><select id="lang" aria-label="language">
+      <option value="en">EN</option><option value="ja">日本語</option><option value="zh">中文</option>
+    </select></span>
+    <button class="ctl" id="themeBtn" title="theme" aria-label="theme">☀</button>
+    <button class="ctl" id="logoutBtn" title="log out" aria-label="log out" data-i18n-title="logout">⏻</button>
+  </div>
+</div></header>
+
+<div class="wrap">
+  <p class="tagline" data-i18n="tagline"></p>
+
+  <div class="streamhead" style="margin-top:2px"><h2 data-i18n="lanes_head"></h2><div class="bar"></div></div>
+  <div id="lanes"><div class="loading" data-i18n="loading"></div></div>
+
+  <div class="streamhead"><h2 data-i18n="runs_head"></h2><div class="bar"></div></div>
+  <div id="runs"><div class="loading" data-i18n="loading"></div></div>
+
+  <div class="streamhead"><h2 data-i18n="conf_head"></h2><div class="bar"></div></div>
+  <div class="card confcard">
+    <span class="ic">✓</span>
+    <span class="txt" data-i18n="conf_desc"></span>
+    <a class="btn" href="/conformance.html" data-i18n="conf_open"></a>
+  </div>
+
+  <div class="streamhead"><h2 data-i18n="live_head"></h2><div class="bar"></div></div>
+  <iframe id="dag" src="/pipeline.html" title="live ingestion flow"></iframe>
+</div>
+
+<script type="module">
+const $ = (s, r=document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// --- i18n (EN / JA / ZH) ---
+const I18N = {
+  en: {
+    nav_sources: "Sources", nav_sink: "Sink", nav_pipelines: "Pipelines", nav_model: "Model",
+    signedIn: "signed in", logout: "Log out", loading: "Loading…",
+    tagline: "The operational surface — <b>ingestion lanes and their run history</b>. Conformance review attaches here as run output.",
+    lanes_head: "Lanes",
+    lanes_empty: "No lanes yet — connect a source in <a href=\"/sources.html\">Sources</a> and start streaming.",
+    state_running: "running", state_paused: "paused",
+    facts_ingested: "facts ingested", last_event: "last event", no_events: "no events yet", cursor: "cursor",
+    runs_head: "Run history",
+    runs_empty: "No runs recorded yet — one-shot applies and backfills append here.",
+    th_pipeline: "pipeline", th_kind: "kind", th_started: "started", th_dur: "duration",
+    th_events: "events", th_facts: "facts", th_result: "result", ok: "ok",
+    conf_head: "Conformance",
+    conf_desc: "<b>Conformance review</b> — the engine evaluates the declared decision-authority rule deterministically; gaps are reviewed by a human and written back as facts.",
+    conf_open: "Open conformance review",
+    live_head: "Live flow",
+    t_now: "just now", t_min: "{n}m ago", t_hour: "{n}h ago", t_day: "{n}d ago",
+    err_unauthorized: "Sign-in required — <a href=\"/login\">sign in</a> and reload.",
+    err_request: "Request failed: {e}",
+  },
+  ja: {
+    nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル",
+    signedIn: "サインイン中", logout: "ログアウト", loading: "読み込み中…",
+    tagline: "運用の中心画面 — <b>取り込みレーンと実行履歴</b>。コンフォーマンスレビューは実行結果としてここに紐づきます。",
+    lanes_head: "レーン",
+    lanes_empty: "レーンはまだありません — <a href=\"/sources.html\">Sources</a> でソースを接続してストリーミングを開始してください。",
+    state_running: "稼働中", state_paused: "一時停止",
+    facts_ingested: "facts 取り込み済み", last_event: "最終イベント", no_events: "イベントはまだありません", cursor: "カーソル",
+    runs_head: "実行履歴",
+    runs_empty: "記録された実行はまだありません — ワンショット適用やバックフィルがここに追記されます。",
+    th_pipeline: "パイプライン", th_kind: "種別", th_started: "開始", th_dur: "所要",
+    th_events: "イベント", th_facts: "ファクト", th_result: "結果", ok: "成功",
+    conf_head: "コンフォーマンス",
+    conf_desc: "<b>コンフォーマンスレビュー</b> — 宣言された決定権限ルールをエンジンが決定的に評価し、ギャップは人がレビューしてファクトとして書き戻します。",
+    conf_open: "コンフォーマンスレビューを開く",
+    live_head: "ライブフロー",
+    t_now: "たった今", t_min: "{n}分前", t_hour: "{n}時間前", t_day: "{n}日前",
+    err_unauthorized: "サインインが必要です — <a href=\"/login\">サインイン</a>して再読み込みしてください。",
+    err_request: "リクエストに失敗しました: {e}",
+  },
+  zh: {
+    nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型",
+    signedIn: "已登录", logout: "登出", loading: "加载中…",
+    tagline: "运维界面 — <b>摄取通道及其运行历史</b>。一致性审查作为运行输出挂在此处。",
+    lanes_head: "通道",
+    lanes_empty: "暂无通道 — 请在 <a href=\"/sources.html\">Sources</a> 中连接数据源并开始流式。",
+    state_running: "运行中", state_paused: "已暂停",
+    facts_ingested: "已摄取事实", last_event: "最近事件", no_events: "尚无事件", cursor: "游标",
+    runs_head: "运行历史",
+    runs_empty: "尚无运行记录 — 一次性应用与回填会追加到这里。",
+    th_pipeline: "管道", th_kind: "类型", th_started: "开始", th_dur: "耗时",
+    th_events: "事件", th_facts: "事实", th_result: "结果", ok: "成功",
+    conf_head: "一致性",
+    conf_desc: "<b>一致性审查</b> — 引擎对声明的决策权限规则进行确定性评估；差距由人工审查并作为事实写回。",
+    conf_open: "打开一致性审查",
+    live_head: "实时流",
+    t_now: "刚刚", t_min: "{n}分钟前", t_hour: "{n}小时前", t_day: "{n}天前",
+    err_unauthorized: "需要登录 — 请<a href=\"/login\">登录</a>后重新加载。",
+    err_request: "请求失败: {e}",
+  },
+};
+let LANG = "en";
+function t(k, v) {
+  let s = (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k;
+  if (v) for (const [key, val] of Object.entries(v)) s = s.replaceAll("{" + key + "}", String(val));
+  return s;
+}
+function applyLang() {
+  document.querySelectorAll("[data-i18n]").forEach((e) => { e.innerHTML = t(e.getAttribute("data-i18n")); });
+  document.querySelectorAll("[data-i18n-title]").forEach((e) => { e.title = t(e.getAttribute("data-i18n-title")); });
+  render();
+}
+
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
+let THEME = store.get("vesicle-theme") || "auto";
+const media = window.matchMedia("(prefers-color-scheme: dark)");
+function resolvedDark() { return THEME === "dark" || (THEME === "auto" && media.matches); }
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", resolvedDark() ? "dark" : "light");
+  $("#themeBtn").textContent = resolvedDark() ? "☾" : "☀";
+}
+function setTheme(v) { THEME = v; store.set("vesicle-theme", v); applyTheme(); }
+media.addEventListener?.("change", () => { if (THEME === "auto") applyTheme(); });
+$("#themeBtn").onclick = () => setTheme(resolvedDark() ? "light" : "dark");
+function setLang(l) { LANG = l; store.set("vesicle-lang", l); $("#lang").value = l; applyLang(); }
+LANG = store.get("vesicle-lang") || "en";
+$("#lang").onchange = (e) => setLang(e.target.value);
+$("#logoutBtn").onclick = async () => { await fetch("/api/logout", { method: "POST" }); location.reload(); };
+
+async function jf(url, opts) {
+  const r = await fetch(url, opts);
+  const text = await r.text();
+  let b; try { b = JSON.parse(text); } catch { b = { error: text || r.statusText }; }
+  if (!r.ok) { const e = new Error(b.error || `HTTP ${r.status}`); e.status = r.status; throw e; }
+  return b;
+}
+
+async function refreshStatus() {
+  try {
+    const s = await jf("/api/status");
+    $("#connPill").classList.toggle("off", !s.stroma);
+    $("#connPill").title = `StromaDB · ${s.url}`;
+    $("#connText").textContent = s.stroma ? "stroma" : "stroma offline";
+    if (s.auth && s.user) { $("#userName").textContent = s.user; $("#userPill").hidden = false; }
+  } catch {
+    $("#connPill").classList.add("off"); $("#connText").textContent = "stroma offline";
+  }
+}
+
+// --- /api/pipelines read model: { pipelines: PipelineDef[], runs: PipelineRun[] } ---
+let DATA = null, ERROR = null;
+
+function rel(ms) {
+  const d = Date.now() - ms;
+  if (d < 90e3) return t("t_now");
+  if (d < 3600e3) return t("t_min", { n: Math.round(d / 60e3) });
+  if (d < 86400e3) return t("t_hour", { n: Math.round(d / 3600e3) });
+  return t("t_day", { n: Math.round(d / 86400e3) });
+}
+function dur(ms) {
+  if (!(ms >= 0)) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60e3) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60e3)}m ${Math.round((ms % 60e3) / 1000)}s`;
+}
+
+function laneCard(p) {
+  const running = p.state === "running";
+  return `<div class="card">
+    <div class="lanehead"><b>${esc(p.name || p.id)}</b>
+      <span class="state ${running ? "running" : ""}"><span class="d"></span>${running ? t("state_running") : t("state_paused")}</span></div>
+    <div class="lanemeta">${esc(p.source)} · ${esc(p.mode)}${p.scope ? ` · <span class="scope">${esc(p.scope)}</span>` : ""}${p.cursor != null ? ` · ${t("cursor")} ${esc(p.cursor)}` : ""}</div>
+    <div class="lanestats">
+      <span><b>${p.ingested ?? 0}</b> ${t("facts_ingested")}</span>
+      <span>${p.lastEventAt ? `${t("last_event")} <b>${rel(p.lastEventAt)}</b>` : t("no_events")}</span>
+    </div>
+    ${p.lastError ? `<div class="laneerr">${esc(p.lastError)}</div>` : ""}
+  </div>`;
+}
+
+function runRow(r) {
+  const result = r.error ? `<span class="errres">${esc(r.error)}</span>` : `<span class="okres">${t("ok")}</span>`;
+  return `<tr>
+    <td class="mono">${esc(r.pipelineId)}</td>
+    <td><span class="kind ${esc(r.kind)}">${esc(r.kind)}</span></td>
+    <td class="mono">${new Date(r.startedAt).toLocaleString()}</td>
+    <td class="mono">${dur(r.finishedAt - r.startedAt)}</td>
+    <td class="mono">${r.events ?? 0}</td>
+    <td class="mono">${r.facts ?? 0}</td>
+    <td>${result}</td>
+  </tr>`;
+}
+
+function render() {
+  const lanes = $("#lanes"), runs = $("#runs");
+  if (ERROR) {
+    const msg = ERROR.status === 401 ? t("err_unauthorized") : esc(t("err_request", { e: ERROR.message }));
+    lanes.innerHTML = `<div class="err">${msg}</div>`;
+    runs.innerHTML = `<div class="err">${msg}</div>`;
+    return;
+  }
+  if (!DATA) { lanes.innerHTML = `<div class="loading">${t("loading")}</div>`; runs.innerHTML = `<div class="loading">${t("loading")}</div>`; return; }
+  const ps = DATA.pipelines ?? [];
+  lanes.innerHTML = ps.length
+    ? `<div class="lanes">${ps.map(laneCard).join("")}</div>`
+    : `<div class="empty">${t("lanes_empty")}</div>`;
+  const rs = DATA.runs ?? [];
+  runs.innerHTML = rs.length
+    ? `<div class="tablewrap"><table>
+        <thead><tr><th>${t("th_pipeline")}</th><th>${t("th_kind")}</th><th>${t("th_started")}</th><th>${t("th_dur")}</th><th>${t("th_events")}</th><th>${t("th_facts")}</th><th>${t("th_result")}</th></tr></thead>
+        <tbody>${rs.map(runRow).join("")}</tbody></table></div>`
+    : `<div class="empty">${t("runs_empty")}</div>`;
+}
+
+async function load() {
+  try { DATA = await jf("/api/pipelines"); ERROR = null; }
+  catch (e) { ERROR = e; }
+  render();
+}
+
+applyTheme();
+setLang(LANG);
+refreshStatus();
+load();
+setInterval(load, 4000);
+setInterval(refreshStatus, 8000);
+</script>
+</body>
+</html>

@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vesicle — sources</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiByeD0iNiIgZmlsbD0iI2YyZWZlNiIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjciIGZpbGw9InVybCgjZykiLz48Y2lyY2xlIGN4PSI5LjYiIGN5PSI5LjMiIHI9IjIiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9Ii41NSIvPjxkZWZzPjxyYWRpYWxHcmFkaWVudCBpZD0iZyIgY3g9IjM0JSIgY3k9IjMyJSIgcj0iNzUlIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMzZmJmYTIiLz48c3RvcCBvZmZzZXQ9Ii41NSIgc3RvcC1jb2xvcj0iIzJmOWU3MyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzIzN2E1OCIvPjwvcmFkaWFsR3JhZGllbnQ+PC9kZWZzPjwvc3ZnPg==">
+<script defer src="/nav.js"></script>
+<style>
+  :root {
+    /* Shared StromaDB design-system tokens — EARTH theme (see wizard.html) */
+    --bg:#f2efe6; --bg-2:#eae5d9; --panel:#fffdf7; --panel-2:#f6f1e7;
+    --line:#e5dfd1; --line-2:#d4ccba; --fg:#211d15; --fg-dim:#574f40; --mut:#8b8371;
+    --accent:#2f9e73; --accent-2:#237a58; --accent-ink:#ffffff;
+    --r:10px; --r-sm:7px;
+    --shadow:0 1px 0 rgba(0,0,0,.02), 0 14px 30px -16px rgba(60,50,30,.22);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.6);
+    --panel-grad:linear-gradient(163deg,color-mix(in oklab,var(--panel) 86%,var(--bg-2) 14%),var(--panel));
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+    --sky:#2c6fa6; --sky-soft:#e6eef5; --clay:#b06a2a; --clay-soft:#f6ecdd; --leaf:#2f9e73; --leaf-soft:#e3f0e9;
+    --good:#237a58; --bad:#a23b3b;
+  }
+  html[data-theme="dark"]{
+    --bg:#13181a; --bg-2:#181e20; --panel:#1d2427; --panel-2:#222a2d;
+    --line:#2b3437; --line-2:#3a4548; --fg:#e9ede9; --fg-dim:#a9b3ab; --mut:#6f7a72;
+    --accent:#40c091; --accent-2:#35a67c; --accent-ink:#eaf6f0;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 16px 34px -14px rgba(0,0,0,.62);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.05);
+    --sky:#5aa0d8; --sky-soft:#182734; --clay:#d0955a; --clay-soft:#2c2418; --leaf:#40c091; --leaf-soft:#15271e;
+    --good:#40c091; --bad:#e0707e;
+  }
+  html[data-theme="dark"] body{background:
+    radial-gradient(1200px 620px at 84% -12%, #17332b 0%, transparent 58%),
+    radial-gradient(1000px 560px at -10% 108%, #16272f 0%, transparent 55%),
+    radial-gradient(1100px 520px at 50% 118%, #241d13 0%, transparent 62%),
+    var(--bg);background-attachment:fixed}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1300px 640px at 82% -14%, #f4e4b6 0%, transparent 56%),
+      linear-gradient(180deg, #f5f3ec 0%, transparent 40%),
+      radial-gradient(900px 520px at -8% 104%, #dbe8d1 0%, transparent 56%),
+      radial-gradient(1300px 560px at 50% 116%, #ebd9b3 0%, transparent 60%),
+      var(--bg);
+    background-attachment:fixed}
+  .wrap{max-width:1160px;margin:0 auto;padding:6px 14px 60px}
+  .topbar{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,color-mix(in oklab,var(--bg) 90%,transparent),color-mix(in oklab,var(--bg) 62%,transparent));backdrop-filter:blur(11px);border-bottom:1px solid var(--line);margin-bottom:18px}
+  .topbar-inner{max-width:1160px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px 14px;flex-wrap:wrap}
+  .mark{display:inline-flex;align-items:center;gap:10px;font-weight:640;letter-spacing:.2px;font-size:16px}
+  .mark .dot{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 34% 32%,#3fbfa2 0%,var(--accent) 46%,var(--accent-2) 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 1px 3px rgba(14,110,92,.4)}
+  .mark small{font-weight:500;color:var(--mut);font-size:12px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font:500 11.5px/1 var(--mono);color:var(--fg-dim);background:var(--panel);border:1px solid var(--line);border-radius:100px;padding:6px 10px;white-space:nowrap}
+  .pill b{color:var(--fg);font-weight:600}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px color-mix(in oklab,var(--accent) 80%,transparent);flex:none}
+  .pill.off{color:var(--mut)} .pill.off .dot{background:var(--mut);box-shadow:none}
+  .pill[hidden]{display:none}
+  .spacer{flex:1}
+  .ctls{display:flex;align-items:center;gap:8px}
+  .ctl{background:linear-gradient(180deg,color-mix(in oklab,var(--panel) 84%,var(--fg-dim) 16%),color-mix(in oklab,var(--panel) 96%,#000 4%));border:1px solid var(--line-2);color:var(--fg-dim);border-radius:var(--r-sm);min-width:34px;height:34px;padding:0 9px;font:inherit;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 2px 6px -3px rgba(0,0,0,.3);transition:color .15s,border-color .15s,filter .15s}
+  .ctl:hover{color:var(--fg);border-color:var(--accent);filter:brightness(1.05)}
+  .ctl.select{padding:0}
+  .ctl select{appearance:none;background:transparent;border:none;color:inherit;font:inherit;font-size:12.5px;padding:0 10px;height:34px;cursor:pointer}
+  .tagline{color:var(--fg-dim);font-size:13.5px;margin:2px 0 18px;max-width:76ch}
+  .tagline b{color:var(--fg);font-weight:600}
+  .streamhead{display:flex;align-items:center;gap:10px;margin:2px 2px 12px}
+  .streamhead h2{font-size:15px;margin:0;letter-spacing:-.01em}
+  .streamhead .bar{flex:1;height:1px;background:var(--line)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-items:start}
+  .card{background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;box-shadow:var(--bevel),var(--shadow)}
+  .card.planned{opacity:.55}
+  .shead{display:flex;align-items:center;gap:9px;margin-bottom:4px}
+  .ic{flex:none;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:13px;font-weight:700;background:color-mix(in oklab,var(--accent) 18%,transparent);color:var(--accent)}
+  .ic.clay{background:color-mix(in oklab,var(--clay) 22%,transparent);color:var(--clay)}
+  .ic.txt{background:color-mix(in oklab,var(--sky) 20%,transparent);color:var(--sky)}
+  .shead b{font-size:14px}
+  .st{margin-left:auto;flex:none;font:700 9.5px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;padding:4px 8px;border-radius:100px;border:1px solid var(--line);color:var(--mut);background:var(--panel-2)}
+  .st.ok{color:var(--accent);background:color-mix(in oklab,var(--accent) 15%,transparent);border-color:color-mix(in oklab,var(--accent) 34%,transparent)}
+  .st.bad{color:var(--bad);background:color-mix(in oklab,var(--bad) 10%,transparent);border-color:color-mix(in oklab,var(--bad) 34%,transparent)}
+  .sdesc{color:var(--mut);font-size:12.5px;margin:0 0 12px}
+  label{display:block;font:600 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:0 0 6px}
+  input,select{width:100%;font:inherit;font-size:13.5px;color:var(--fg);background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:9px 11px}
+  input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 22%,transparent)}
+  .btn{font:inherit;font-weight:640;font-size:13.5px;border:1px solid transparent;border-radius:var(--r-sm);padding:9px 14px;cursor:pointer;color:var(--accent-ink);background:linear-gradient(180deg,var(--accent),var(--accent-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.3);transition:filter .15s}
+  .btn:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;border-color:var(--line-2);color:var(--fg);box-shadow:none}
+  .btn.ghost:hover{border-color:var(--accent)}
+  .btn:disabled{opacity:.5;cursor:default;filter:none}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .conn{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg-dim);margin-bottom:12px;flex-wrap:wrap}
+  .conn .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none}
+  .conn a{color:var(--fg-dim)}
+  .hint{color:var(--mut);font-size:12.5px;margin:0 0 12px;line-height:1.45}
+  .hint b{color:var(--fg);font-weight:600}
+  .pollstat{margin-top:12px;font:12.5px/1.5 var(--mono);color:var(--accent-2);display:flex;align-items:center;gap:8px}
+  .pollstat .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.4s ease-in-out infinite;flex:none}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .msg{margin-top:12px;font:12.5px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--line)}
+  .msg.ok{color:var(--good);background:color-mix(in oklab,var(--accent) 8%,transparent);border-color:color-mix(in oklab,var(--accent) 30%,transparent)}
+  .msg.err{color:var(--bad);background:color-mix(in oklab,var(--bad) 8%,transparent);border-color:color-mix(in oklab,var(--bad) 30%,transparent)}
+  .err{color:var(--bad);font-size:13px;background:color-mix(in oklab,var(--bad) 10%,var(--panel));border:1px solid color-mix(in oklab,var(--bad) 34%,var(--line));border-radius:var(--r-sm);padding:10px 12px;margin:8px 0}
+  .err a{color:inherit}
+  .loading{color:var(--mut);font-size:13px;padding:8px 0}
+  .note{margin-top:18px;padding:11px 13px;background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);font-size:12.5px;color:var(--fg-dim);line-height:1.5;box-shadow:var(--bevel),var(--shadow)}
+  .note a{color:var(--accent-2);font-weight:600}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}.pollstat .dot{animation:none}}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+  <span class="mark"><span class="dot"></span>Vesicle <small data-i18n="nav_sources">sources</small></span>
+  <div id="vnav"></div>
+  <span class="pill off" id="connPill" title="StromaDB"><span class="dot"></span><span id="connText">stroma</span></span>
+  <span class="spacer"></span>
+  <div class="ctls">
+    <span class="pill" id="userPill" hidden><span data-i18n="signedIn">signed in</span> <b id="userName"></b></span>
+    <span class="ctl select"><select id="lang" aria-label="language">
+      <option value="en">EN</option><option value="ja">日本語</option><option value="zh">中文</option>
+    </select></span>
+    <button class="ctl" id="themeBtn" title="theme" aria-label="theme">☀</button>
+    <button class="ctl" id="logoutBtn" title="log out" aria-label="log out" data-i18n-title="logout">⏻</button>
+  </div>
+</div></header>
+
+<div class="wrap">
+  <p class="tagline" data-i18n="tagline"></p>
+  <div id="oauthDone" class="msg ok" style="margin:0 0 14px" hidden data-i18n="oauth_done"></div>
+
+  <div class="streamhead"><h2 data-i18n="head_connectors"></h2><div class="bar"></div></div>
+  <div class="grid">
+    <div class="card" id="backlogCard">
+      <div class="shead"><span class="ic clay">B</span><b>Backlog</b><span class="st" id="blStatus" data-i18n="st_checking"></span></div>
+      <p class="sdesc" data-i18n="backlog_desc"></p>
+      <div id="blBody"><div class="loading" data-i18n="loading"></div></div>
+    </div>
+    <div class="card planned">
+      <div class="shead"><span class="ic">P</span><b>PostgreSQL</b><span class="st" data-i18n="planned"></span></div>
+      <p class="sdesc" data-i18n="planned_desc"></p>
+    </div>
+    <div class="card planned">
+      <div class="shead"><span class="ic clay">J</span><b>Jira</b><span class="st" data-i18n="planned"></span></div>
+      <p class="sdesc" data-i18n="planned_desc"></p>
+    </div>
+    <div class="card planned">
+      <div class="shead"><span class="ic txt">C</span><b>Confluence</b><span class="st" data-i18n="planned"></span></div>
+      <p class="sdesc" data-i18n="planned_desc"></p>
+    </div>
+    <div class="card planned">
+      <div class="shead"><span class="ic txt">D</span><b>Google Docs</b><span class="st" data-i18n="planned"></span></div>
+      <p class="sdesc" data-i18n="planned_desc"></p>
+    </div>
+  </div>
+
+  <div class="note" data-i18n="lanes_note"></div>
+</div>
+
+<script type="module">
+const $ = (s, r=document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// --- i18n (EN / JA / ZH) ---
+const I18N = {
+  en: {
+    nav_sources: "Sources", nav_sink: "Sink", nav_pipelines: "Pipelines", nav_model: "Model",
+    signedIn: "signed in", logout: "Log out", loading: "Loading…",
+    tagline: "Connect the systems that stream events into the graph — <b>each connected source feeds an ingestion lane</b> you can watch in Pipelines.",
+    head_connectors: "Connectors",
+    oauth_done: "Backlog connected — pick a project and start streaming.",
+    backlog_desc: "Stream issue events from a Backlog project. OAuth only — no API keys.",
+    st_checking: "checking…", st_connected: "connected", st_disconnected: "not connected", st_error: "error",
+    host_label: "Backlog space", host_invalid: "Enter a Backlog space like example.backlog.com",
+    connect_btn: "Connect with Backlog",
+    connected_to: "Connected to", disconnect: "disconnect",
+    mode_hint: "<b>Poll</b> streams issue events over OAuth with no public URL — recommended. <b>Webhook</b> is push and needs a public URL Backlog can reach.",
+    project_label: "Project", no_projects: "(no projects)",
+    start_poll: "Start streaming (poll)", stop_poll: "Stop", install_webhook: "Install webhook",
+    webhook_needs: "needs a public URL Backlog can reach",
+    streaming_line: "streaming {project} · {n} facts ingested",
+    msg_started: "Streaming {project} — polling Backlog over OAuth every few seconds (no public URL needed).",
+    msg_stopped: "Stopped streaming.",
+    msg_webhook: "Webhook #{id} installed on {project}.\nDelivering to {url}",
+    planned: "planned", planned_desc: "Not yet available.",
+    lanes_note: "Connected sources feed ingestion lanes — watch them run in <a href=\"/pipelines.html\">Pipelines</a>.",
+    err_unauthorized: "Sign-in required — <a href=\"/login\">sign in</a> and reload.",
+    err_request: "Request failed: {e}",
+  },
+  ja: {
+    nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル",
+    signedIn: "サインイン中", logout: "ログアウト", loading: "読み込み中…",
+    tagline: "グラフへイベントを流し込むシステムを接続します — <b>接続したソースはそれぞれ取り込みレーンに供給</b>され、Pipelines で稼働状況を確認できます。",
+    head_connectors: "コネクター",
+    oauth_done: "Backlog に接続しました — プロジェクトを選んでストリーミングを開始してください。",
+    backlog_desc: "Backlog プロジェクトの課題イベントをストリーミング。OAuth のみ — API キー不要。",
+    st_checking: "確認中…", st_connected: "接続済み", st_disconnected: "未接続", st_error: "エラー",
+    host_label: "Backlog スペース", host_invalid: "example.backlog.com の形式で入力してください",
+    connect_btn: "Backlog で接続",
+    connected_to: "接続先:", disconnect: "切断",
+    mode_hint: "<b>ポーリング</b>は公開 URL なしで OAuth 経由でイベントを取得します — 推奨。<b>Webhook</b> はプッシュ型で、Backlog から到達できる公開 URL が必要です。",
+    project_label: "プロジェクト", no_projects: "（プロジェクトなし）",
+    start_poll: "ストリーミング開始（ポーリング）", stop_poll: "停止", install_webhook: "Webhook を設置",
+    webhook_needs: "Backlog から到達できる公開 URL が必要です",
+    streaming_line: "{project} をストリーミング中 · {n} facts 取り込み済み",
+    msg_started: "{project} のストリーミングを開始 — 数秒ごとに OAuth 経由で Backlog をポーリングします（公開 URL 不要）。",
+    msg_stopped: "ストリーミングを停止しました。",
+    msg_webhook: "Webhook #{id} を {project} に設置しました。\n配信先: {url}",
+    planned: "予定", planned_desc: "まだ利用できません。",
+    lanes_note: "接続済みのソースは取り込みレーンに供給されます — 稼働状況は <a href=\"/pipelines.html\">Pipelines</a> で確認できます。",
+    err_unauthorized: "サインインが必要です — <a href=\"/login\">サインイン</a>して再読み込みしてください。",
+    err_request: "リクエストに失敗しました: {e}",
+  },
+  zh: {
+    nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型",
+    signedIn: "已登录", logout: "登出", loading: "加载中…",
+    tagline: "连接向图谱流式发送事件的系统 — <b>每个已连接的数据源都会供给一条摄取通道</b>，可在 Pipelines 中查看运行情况。",
+    head_connectors: "连接器",
+    oauth_done: "Backlog 已连接 — 选择项目并开始流式。",
+    backlog_desc: "从 Backlog 项目流式接收议题事件。仅 OAuth — 无需 API 密钥。",
+    st_checking: "检查中…", st_connected: "已连接", st_disconnected: "未连接", st_error: "错误",
+    host_label: "Backlog 空间", host_invalid: "请输入形如 example.backlog.com 的 Backlog 空间",
+    connect_btn: "使用 Backlog 连接",
+    connected_to: "已连接到", disconnect: "断开连接",
+    mode_hint: "<b>轮询</b>通过 OAuth 拉取事件，无需公开 URL — 推荐。<b>Webhook</b> 为推送方式，需要 Backlog 能访问的公开 URL。",
+    project_label: "项目", no_projects: "（无项目）",
+    start_poll: "开始流式（轮询）", stop_poll: "停止", install_webhook: "安装 Webhook",
+    webhook_needs: "需要 Backlog 能访问的公开 URL",
+    streaming_line: "正在流式 {project} · 已摄取 {n} 条事实",
+    msg_started: "已开始流式 {project} — 每隔几秒通过 OAuth 轮询 Backlog（无需公开 URL）。",
+    msg_stopped: "已停止流式。",
+    msg_webhook: "已在 {project} 上安装 Webhook #{id}。\n投递至 {url}",
+    planned: "计划中", planned_desc: "暂不可用。",
+    lanes_note: "已连接的数据源供给摄取通道 — 在 <a href=\"/pipelines.html\">Pipelines</a> 中查看运行情况。",
+    err_unauthorized: "需要登录 — 请<a href=\"/login\">登录</a>后重新加载。",
+    err_request: "请求失败: {e}",
+  },
+};
+let LANG = "en";
+function t(k, v) {
+  let s = (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k;
+  if (v) for (const [key, val] of Object.entries(v)) s = s.replaceAll("{" + key + "}", String(val));
+  return s;
+}
+function applyLang() {
+  document.querySelectorAll("[data-i18n]").forEach((e) => { e.innerHTML = t(e.getAttribute("data-i18n")); });
+  document.querySelectorAll("[data-i18n-title]").forEach((e) => { e.title = t(e.getAttribute("data-i18n-title")); });
+  renderBacklog();
+}
+
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
+
+// --- theme (shared key with the wizard) ---
+let THEME = store.get("vesicle-theme") || "auto";
+const media = window.matchMedia("(prefers-color-scheme: dark)");
+function resolvedDark() { return THEME === "dark" || (THEME === "auto" && media.matches); }
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", resolvedDark() ? "dark" : "light");
+  $("#themeBtn").textContent = resolvedDark() ? "☾" : "☀";
+}
+function setTheme(v) { THEME = v; store.set("vesicle-theme", v); applyTheme(); }
+media.addEventListener?.("change", () => { if (THEME === "auto") applyTheme(); });
+$("#themeBtn").onclick = () => setTheme(resolvedDark() ? "light" : "dark");
+
+// --- language ---
+function setLang(l) { LANG = l; store.set("vesicle-lang", l); $("#lang").value = l; applyLang(); }
+LANG = store.get("vesicle-lang") || "en";
+$("#lang").onchange = (e) => setLang(e.target.value);
+$("#logoutBtn").onclick = async () => { await fetch("/api/logout", { method: "POST" }); location.reload(); };
+
+async function jf(url, opts) {
+  const r = await fetch(url, opts);
+  const text = await r.text();
+  let b; try { b = JSON.parse(text); } catch { b = { error: text || r.statusText }; }
+  if (!r.ok) { const e = new Error(b.error || `HTTP ${r.status}`); e.status = r.status; throw e; }
+  return b;
+}
+
+// --- topbar connection pill ---
+async function refreshStatus() {
+  try {
+    const s = await jf("/api/status");
+    $("#connPill").classList.toggle("off", !s.stroma);
+    $("#connPill").title = `StromaDB · ${s.url}`;
+    $("#connText").textContent = s.stroma ? "stroma" : "stroma offline";
+    if (s.auth && s.user) { $("#userName").textContent = s.user; $("#userPill").hidden = false; }
+  } catch {
+    $("#connPill").classList.add("off"); $("#connText").textContent = "stroma offline";
+  }
+}
+
+// --- Backlog card state machine: loading → error | disconnected | connected ---
+const BL = { state: "loading", host: null, projects: null, projectsError: null, poll: null, msg: null, error: null };
+let pollTimer = null;
+
+function setStatusChip() {
+  const chip = $("#blStatus");
+  chip.classList.remove("ok", "bad");
+  if (BL.state === "loading") chip.textContent = t("st_checking");
+  else if (BL.state === "error") { chip.textContent = t("st_error"); chip.classList.add("bad"); }
+  else if (BL.state === "connected") { chip.textContent = t("st_connected"); chip.classList.add("ok"); }
+  else chip.textContent = t("st_disconnected");
+}
+
+function renderBacklog() {
+  setStatusChip();
+  const root = $("#blBody"); root.innerHTML = "";
+  if (BL.state === "loading") { root.innerHTML = `<div class="loading">${t("loading")}</div>`; return; }
+  if (BL.state === "error") {
+    root.innerHTML = `<div class="err">${BL.error.status === 401 ? t("err_unauthorized") : esc(t("err_request", { e: BL.error.message }))}</div>`;
+    return;
+  }
+  if (BL.state === "disconnected") {
+    root.innerHTML = `
+      <form id="connectForm" action="/api/backlog/oauth/start" method="get">
+        <label for="host">${t("host_label")}</label>
+        <input id="host" name="host" placeholder="example.backlog.com" autocomplete="off" spellcheck="false" required>
+        <div class="actions"><button class="btn" type="submit">${t("connect_btn")}</button></div>
+        <div id="hostErr"></div>
+      </form>`;
+    $("#connectForm").addEventListener("submit", (e) => {
+      const host = $("#host").value.trim().toLowerCase();
+      if (!/^[a-z0-9-]+\.(backlog\.(com|jp)|backlogtool\.com)$/.test(host)) {
+        e.preventDefault();
+        $("#hostErr").innerHTML = `<div class="msg err">${t("host_invalid")}</div>`;
+      }
+    });
+    return;
+  }
+  // connected
+  const projOpts = (BL.projects ?? []).map((p) =>
+    `<option value="${esc(p.projectKey)}">${esc(p.name)} (${esc(p.projectKey)})</option>`).join("")
+    || `<option>${t("no_projects")}</option>`;
+  const running = !!BL.poll?.running;
+  root.innerHTML = `
+    <div class="conn"><span class="dot"></span> ${t("connected_to")} <b>${esc(BL.host)}</b> · <a href="#" id="disconnect">${t("disconnect")}</a></div>
+    <p class="hint">${t("mode_hint")}</p>
+    <label for="project">${t("project_label")}</label>
+    <select id="project">${projOpts}</select>
+    <div class="actions">
+      <button class="btn" id="startPoll">${t("start_poll")}</button>
+      <button class="btn ghost" id="stopPoll" ${running ? "" : "hidden"}>${t("stop_poll")}</button>
+      <button class="btn ghost" id="install" title="${esc(t("webhook_needs"))}">${t("install_webhook")}</button>
+    </div>
+    <div class="pollstat" id="pollstat" ${running ? "" : "hidden"}></div>
+    <div id="msg"></div>`;
+  if (BL.projectsError) show("err", BL.projectsError);
+  if (running) {
+    if (BL.poll.project) $("#project").value = BL.poll.project;
+    $("#pollstat").innerHTML = `<span class="dot"></span> ${esc(t("streaming_line", { project: BL.poll.project ?? "?", n: BL.poll.ingested ?? 0 }))}${BL.poll.error ? ` · <span style="color:var(--bad)">${esc(BL.poll.error)}</span>` : ""}`;
+  }
+  if (BL.msg) show(BL.msg.kind, BL.msg.text);
+  $("#disconnect").onclick = async (e) => {
+    e.preventDefault();
+    try { await jf("/api/backlog/disconnect", { method: "POST" }); BL.msg = null; await refresh(); }
+    catch (err) { show("err", err.message); }
+  };
+  $("#startPoll").onclick = async () => {
+    const project = $("#project").value; if (!project) return;
+    $("#startPoll").disabled = true;
+    try {
+      await jf("/api/backlog/poll/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project }) });
+      BL.msg = { kind: "ok", text: t("msg_started", { project }) };
+      await pollStatus();
+    } catch (e) { show("err", e.message); }
+    finally { const b = $("#startPoll"); if (b) b.disabled = false; }
+  };
+  $("#stopPoll").onclick = async () => {
+    try { await jf("/api/backlog/poll/stop", { method: "POST" }); BL.msg = { kind: "ok", text: t("msg_stopped") }; await pollStatus(); }
+    catch (e) { show("err", e.message); }
+  };
+  $("#install").onclick = async () => {
+    const project = $("#project").value; if (!project) return;
+    $("#install").disabled = true;
+    try {
+      const r = await jf("/api/backlog/webhook", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project }) });
+      BL.msg = { kind: "ok", text: t("msg_webhook", { id: r.id, project, url: r.hookUrl }) };
+      renderBacklog();
+    } catch (e) { show("err", e.message); }
+    finally { const b = $("#install"); if (b) b.disabled = false; }
+  };
+}
+function show(kind, text) { const m = $("#msg"); if (m) { m.className = "msg " + kind; m.textContent = text; } }
+
+async function pollStatus() {
+  try {
+    const prev = BL.poll?.running;
+    BL.poll = await jf("/api/backlog/poll/status");
+    if (BL.poll.running) { if (!pollTimer) pollTimer = setInterval(pollStatus, 4000); }
+    else if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (BL.poll.running !== prev) renderBacklog();
+    else if (BL.poll.running) { // refresh the counter line in place
+      const ps = $("#pollstat");
+      if (ps) { ps.hidden = false; ps.innerHTML = `<span class="dot"></span> ${esc(t("streaming_line", { project: BL.poll.project ?? "?", n: BL.poll.ingested ?? 0 }))}${BL.poll.error ? ` · <span style="color:var(--bad)">${esc(BL.poll.error)}</span>` : ""}`; }
+    }
+  } catch { /* transient poll-status failure: keep the last known state */ }
+}
+
+async function refresh() {
+  try {
+    const s = await jf("/api/backlog/status");
+    if (!s.connected) { BL.state = "disconnected"; renderBacklog(); return; }
+    BL.state = "connected"; BL.host = s.host;
+    BL.projects = null; BL.projectsError = null;
+    try { BL.projects = (await jf("/api/backlog/projects")).projects; }
+    catch (e) { BL.projectsError = e.status === 401 ? t("err_unauthorized") : e.message; }
+    await pollStatus();
+    renderBacklog();
+  } catch (e) {
+    BL.state = "error"; BL.error = e; renderBacklog();
+  }
+}
+
+// arriving from the OAuth callback (/connect?connected=1 → here): confirm and clean the URL
+if (new URLSearchParams(location.search).get("connected") === "1") {
+  $("#oauthDone").hidden = false;
+  history.replaceState(null, "", location.pathname);
+}
+
+applyTheme();
+setLang(LANG);
+refreshStatus();
+refresh();
+</script>
+</body>
+</html>

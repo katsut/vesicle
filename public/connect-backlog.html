@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vesicle — connect Backlog</title>
+<script defer src="/nav.js"></script>
 <style>
   :root{
     --bg:#f2efe6; --panel:#fffdf7; --panel-2:#f6f1e7; --line:#e5dfd1; --line-2:#d4ccba;
@@ -54,8 +55,11 @@
 </head>
 <body>
 <div class="card">
+  <!-- shared nav mounts here (the body is a centering flex container, so the standalone strip can't be used) -->
+  <div id="vnav" style="margin:0 0 18px"></div>
   <h1>Connect <b>Backlog</b></h1>
-  <p class="sub">Sign in with Backlog, pick a project, and install the webhook that streams its issue events into StromaDB. OAuth only — no API keys.</p>
+  <p class="sub">Sign in with Backlog, pick a project, and install the webhook that streams its issue events into StromaDB. OAuth only — no API keys.
+    This page is also available as the Backlog card on <a href="/sources.html">Sources</a>.</p>
 
   <div class="step" id="step1">
     <h2><span class="n">1</span> Sign in</h2>
