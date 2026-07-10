@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 import { backlogEventToBatch, isoToEpoch, type BacklogWebhook } from "../backlog.ts";
 import { Stroma } from "../stroma.ts";
+import { toNdjson } from "../etl/sink.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = ["backlog-issue-created.json", "backlog-issue-updated.json"].map((f) =>
@@ -31,14 +32,14 @@ for (const p of paths) {
   const batch = backlogEventToBatch(ev);
   console.log(`\n# ${p}\n# → ${batch.kind}: ${batch.summary} (${batch.factCount} facts)`);
   if (doIngest && stroma) {
-    if (!batch.ndjson) {
+    if (!batch.items.length) {
       console.log("  (ignored — nothing to ingest)");
       continue;
     }
-    const res = await stroma.ingest(batch.ndjson);
+    const res = await stroma.ingest(toNdjson(batch.items));
     console.log("  ingested:", JSON.stringify(res));
   } else {
-    process.stdout.write(batch.ndjson);
+    process.stdout.write(toNdjson(batch.items));
   }
 }
 

@@ -4,6 +4,9 @@ dist/
 .env
 scratch/
 
+# runtime connector config — var/config.json holds OAuth tokens (never publish)
+var/
+
 # AI assistant artifacts (never publish)
 CLAUDE.md
 .claude/

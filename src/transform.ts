@@ -1,4 +1,4 @@
-// Turn confirmed mapping + source rows into StromaDB ingest NDJSON.
+// Turn confirmed mapping + source rows into StromaDB ingest batch items.
 //
 // The engine's ingest is triples: type_def / pred_def(domain,range) / node / fact(object=node|value).
 // It does NOT yet carry edge properties (level, allocation, role) or valid-time on a fact — so those,
@@ -6,6 +6,7 @@
 // That gap IS a finding: the confirm UX surfaces edge attributes the MVP engine can't store yet.
 
 import type { Mapping, SchemaModel, Table } from "./types.ts";
+import type { BatchItem, Fact, NodeRecord } from "./etl/types.ts";
 
 /** A note from the transform. `code` + `params` let a UI localize it; `text` is the English default. */
 export interface Gap {
@@ -15,7 +16,8 @@ export interface Gap {
 }
 
 export interface TransformResult {
-  ndjson: string;
+  /** engine ingest records (defs + nodes + facts); the sink owns their wire encoding */
+  items: BatchItem[];
   /** graph-type → (source pk value → global node id) */
   idMap: Record<string, Record<string, number>>;
   /** source table → graph type */
@@ -50,7 +52,7 @@ function fkTo(t: Table | undefined, refTable: string): string | undefined {
 }
 
 export function transform(schema: SchemaModel, mapping: Mapping, data: Rows): TransformResult {
-  const lines: string[] = [];
+  const items: BatchItem[] = [];
   const gaps: Gap[] = [];
   const gap = (code: string, params: Record<string, string>, text: string) => gaps.push({ code, params, text });
   const idMap: Record<string, Record<string, number>> = {};
@@ -64,7 +66,7 @@ export function transform(schema: SchemaModel, mapping: Mapping, data: Rows): Tr
     typeOf[table] = gtype;
     tableOfType[gtype] = table;
     if (!seenTypes.has(gtype)) {
-      lines.push(JSON.stringify({ type_def: { name: gtype } }));
+      items.push({ type_def: { name: gtype } });
       seenTypes.add(gtype);
     }
     idMap[gtype] ??= {};
@@ -76,9 +78,9 @@ export function transform(schema: SchemaModel, mapping: Mapping, data: Rows): Tr
       idMap[gtype]![key] = gid;
       // a `label` column becomes the node's ABAC sensitivity label (post-authz: reads scoped by
       // allowed_labels exclude nodes whose label the caller isn't cleared for).
-      const node: Record<string, unknown> = { id: gid, type: gtype };
+      const node: NodeRecord = { id: gid, type: gtype };
       if (typeof row["label"] === "number") node.label = row["label"];
-      lines.push(JSON.stringify({ node }));
+      items.push({ node });
     }
   }
 
@@ -88,13 +90,11 @@ export function transform(schema: SchemaModel, mapping: Mapping, data: Rows): Tr
   // 2. predicates + facts
   for (const p of mapping.predicates) {
     const toIsEntity = !!tableOfType[p.to];
-    lines.push(
-      JSON.stringify({
-        pred_def: toIsEntity
-          ? { name: p.name, cardinality: p.cardinality, domain: p.from, range: p.to }
-          : { name: p.name, cardinality: p.cardinality, domain: p.from, range_value: "text" },
-      }),
-    );
+    items.push({
+      pred_def: toIsEntity
+        ? { name: p.name, cardinality: p.cardinality, domain: p.from, range: p.to }
+        : { name: p.name, cardinality: p.cardinality, domain: p.from, range_value: "text" },
+    });
     // valid_to (an edge's end) is carried as engine valid-time only on a one-cardinality predicate
     // (SetOne). On a many-edge the engine has no valid-time, so the end is carried as an *edge
     // property* instead — the app filters "current vs ended" from it (curation, not a reasoner).
@@ -106,8 +106,8 @@ export function transform(schema: SchemaModel, mapping: Mapping, data: Rows): Tr
 
     // build a fact with optional props (edge attributes) + valid_to (end of validity) from a row.
     const emitFact = (subj: number, obj: number, row: Record<string, unknown>) => {
-      const fact: Record<string, unknown> = { subject: subj, predicate: p.name, object: { node: obj } };
-      const props: Record<string, unknown> = {};
+      const fact: Fact = { subject: subj, predicate: p.name, object: { node: obj } };
+      const props: Record<string, number | string | boolean> = {};
       if (p.properties?.length) {
         for (const col of p.properties) {
           const pv = propValue(row[col]);
@@ -123,7 +123,7 @@ export function transform(schema: SchemaModel, mapping: Mapping, data: Rows): Tr
         const vt = dateToInt(row[p.valid_end!]);
         if (vt !== undefined) fact.valid_to = vt;
       }
-      lines.push(JSON.stringify({ fact }));
+      items.push({ fact });
     };
 
     const src = p.source;
@@ -144,7 +144,7 @@ export function transform(schema: SchemaModel, mapping: Mapping, data: Rows): Tr
           const obj = gid(p.to, val);
           if (obj != null) emitFact(subj, obj, row);
         } else {
-          lines.push(JSON.stringify({ fact: { subject: subj, predicate: p.name, object: { text: String(val) } } }));
+          items.push({ fact: { subject: subj, predicate: p.name, object: { text: String(val) } } });
         }
       }
       continue;
@@ -171,5 +171,5 @@ export function transform(schema: SchemaModel, mapping: Mapping, data: Rows): Tr
     }
   }
 
-  return { ndjson: lines.join("\n") + "\n", idMap, typeOf, gaps };
+  return { items, idMap, typeOf, gaps };
 }
