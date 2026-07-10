@@ -64,7 +64,7 @@ const backlogSource = new BacklogSource();
 
 const logRepairs = (pipelineId: string, repairs: Repair[]): void => {
   for (const r of repairs) {
-    console.log(`  late-arrival repair (${pipelineId}): re-asserted head of ${r.subject} "${r.predicate}" (current valid_from ${r.validFrom} > incoming ${r.incomingValidFrom})`);
+    console.log(`  late-arrival repair (${pipelineId}): re-asserted ${r.object ? "head" : "close"} of ${r.subject} "${r.predicate}" (current valid_from ${r.validFrom} > incoming ${r.incomingValidFrom})`);
   }
 };
 

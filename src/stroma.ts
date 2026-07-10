@@ -111,14 +111,16 @@ export class Stroma {
   }
 
   /** point(subject, predicate) full response for a one-cardinality predicate: the value in effect
-   *  ({node} or {text}, null when absent), the winning version's valid_from, and its provenance —
-   *  for writers that compare event times before ingesting (the late-arrival guard). */
+   *  ({node} or {text}, null when absent), the winning version's valid_from, its provenance, and —
+   *  when the winner is a close — the close boundary (closed_from), which distinguishes "ended" from
+   *  "never written". For writers that compare event times before ingesting (the late-arrival guard). */
   async pointRecord(subject: number, predicate: string): Promise<PointRecord> {
     const j = await this.query({ op: "point", subject, predicate });
     return {
       one: (j.one as PointRecord["one"]) ?? null,
       valid_from: typeof j.valid_from === "number" ? j.valid_from : undefined,
       provenance: typeof j.provenance === "string" ? j.provenance : undefined,
+      closed_from: typeof j.closed_from === "number" ? j.closed_from : undefined,
     };
   }
 
@@ -158,11 +160,13 @@ export class Stroma {
 }
 
 /** The full `point` response for a one-cardinality predicate. `valid_from` is the winning version's
- *  (present when the engine reports it for a current value). */
+ *  (present when the engine reports it for a current value); `closed_from` is the close boundary when
+ *  the current winner is a close (absent for a live value or a never-written key). */
 export interface PointRecord {
   one: { node?: number; text?: string } | null;
   valid_from?: number;
   provenance?: string;
+  closed_from?: number;
 }
 
 /** A conformance verdict as the engine returns it (node-valued required/actual in the first cut). */
