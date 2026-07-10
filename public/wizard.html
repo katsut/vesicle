@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vesicle authoring</title>
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiByeD0iNiIgZmlsbD0iI2YyZWZlNiIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjciIGZpbGw9InVybCgjZykiLz48Y2lyY2xlIGN4PSI5LjYiIGN5PSI5LjMiIHI9IjIiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9Ii41NSIvPjxkZWZzPjxyYWRpYWxHcmFkaWVudCBpZD0iZyIgY3g9IjM0JSIgY3k9IjMyJSIgcj0iNzUlIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMzZmJmYTIiLz48c3RvcCBvZmZzZXQ9Ii41NSIgc3RvcC1jb2xvcj0iIzJmOWU3MyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzIzN2E1OCIvPjwvcmFkaWFsR3JhZGllbnQ+PC9kZWZzPjwvc3ZnPg==">
+<script defer src="/nav.js"></script>
 <style>
   :root {
     /* Shared StromaDB design-system tokens — EARTH theme (warm daylight; the Stroma console is the
@@ -58,7 +59,7 @@
   .wrap{max-width:1760px;margin:0 auto;padding:6px 14px 60px}
   /* full-bleed sticky topbar HUD — the Stroma console's composition, earth-warmed */
   .topbar{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,color-mix(in oklab,var(--bg) 90%,transparent),color-mix(in oklab,var(--bg) 62%,transparent));backdrop-filter:blur(11px);border-bottom:1px solid var(--line);margin-bottom:18px}
-  .topbar-inner{max-width:1760px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px 14px}
+  .topbar-inner{max-width:1760px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px 14px;flex-wrap:wrap}
   .mark{display:inline-flex;align-items:center;gap:10px;font-weight:640;letter-spacing:.2px;font-size:16px}
   .mark .dot{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 34% 32%,#3fbfa2 0%,var(--accent) 46%,var(--accent-ink) 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 1px 3px rgba(14,110,92,.4)}
   .mark small{font-weight:500;color:var(--faint);font-size:12px}
@@ -206,7 +207,8 @@
 </style>
 </head>
 <body>
-<header class="topbar"><div class="topbar-inner"><span class="mark"><span class="dot"></span>Vesicle <small>authoring</small></span>
+<header class="topbar"><div class="topbar-inner"><span class="mark"><span class="dot"></span>Vesicle <small data-i18n="mark_authoring">model · authoring</small></span>
+    <div id="vnav"></div>
     <span class="pill conn off" id="connPill" title="StromaDB"><span class="dot"></span><span id="connText">stroma</span></span>
     <span class="spacer"></span>
     <div class="ctls">
@@ -351,6 +353,7 @@ const I18N = {
     try_asof_note: "“As of” reads valid-time when the base facts carry it.", try_trace: "path:",
     try_lead_one: "The {name} of {subject} is:", try_lead_many: "The {name} of {subject}:",
     settings: "Settings", logout: "Log out", signedIn: "signed in", v_author: "Author", v_pipeline: "Pipeline", settings_title: "Settings", settings_sub: "Theme, language, and connection.",
+    nav_sources: "Sources", nav_sink: "Sink", nav_pipelines: "Pipelines", nav_model: "Model", mark_authoring: "model · authoring",
     set_theme: "Theme", theme_light: "Light", theme_dark: "Dark", theme_auto: "Auto",
     set_lang: "Language", set_stroma: "StromaDB connection", close: "Done",
   },
@@ -389,6 +392,7 @@ const I18N = {
     try_asof_note: "「時点指定」はベースの事実が有効時間を持つときに反映されます。", try_trace: "経路:",
     try_lead_one: "{subject} の {name}:", try_lead_many: "{subject} の {name}:",
     settings: "設定", logout: "ログアウト", signedIn: "サインイン中", v_author: "作成", v_pipeline: "パイプライン", settings_title: "設定", settings_sub: "テーマ・言語・接続。",
+    nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル", mark_authoring: "モデル · 作成",
     set_theme: "テーマ", theme_light: "ライト", theme_dark: "ダーク", theme_auto: "自動",
     set_lang: "言語", set_stroma: "StromaDB 接続", close: "完了",
   },
@@ -427,6 +431,7 @@ const I18N = {
     try_asof_note: "「截至」在基础事实带有有效时间时才生效。", try_trace: "路径:",
     try_lead_one: "{subject} 的 {name}:", try_lead_many: "{subject} 的 {name}:",
     settings: "设置", logout: "登出", signedIn: "已登录", v_author: "编辑", v_pipeline: "管道", settings_title: "设置", settings_sub: "主题、语言与连接。",
+    nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型", mark_authoring: "模型 · 创建",
     set_theme: "主题", theme_light: "浅色", theme_dark: "深色", theme_auto: "自动",
     set_lang: "语言", set_stroma: "StromaDB 连接", close: "完成",
   },

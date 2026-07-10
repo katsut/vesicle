@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vesicle — model</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiByeD0iNiIgZmlsbD0iI2YyZWZlNiIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjciIGZpbGw9InVybCgjZykiLz48Y2lyY2xlIGN4PSI5LjYiIGN5PSI5LjMiIHI9IjIiIGZpbGw9IiNmZmZmZmYiIG9wYWNpdHk9Ii41NSIvPjxkZWZzPjxyYWRpYWxHcmFkaWVudCBpZD0iZyIgY3g9IjM0JSIgY3k9IjMyJSIgcj0iNzUlIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMzZmJmYTIiLz48c3RvcCBvZmZzZXQ9Ii41NSIgc3RvcC1jb2xvcj0iIzJmOWU3MyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzIzN2E1OCIvPjwvcmFkaWFsR3JhZGllbnQ+PC9kZWZzPjwvc3ZnPg==">
+<script defer src="/nav.js"></script>
+<style>
+  :root {
+    /* Shared StromaDB design-system tokens — EARTH theme (see wizard.html) */
+    --bg:#f2efe6; --bg-2:#eae5d9; --panel:#fffdf7; --panel-2:#f6f1e7;
+    --line:#e5dfd1; --line-2:#d4ccba; --fg:#211d15; --fg-dim:#574f40; --mut:#8b8371;
+    --accent:#2f9e73; --accent-2:#237a58; --accent-ink:#ffffff;
+    --r:10px; --r-sm:7px;
+    --shadow:0 1px 0 rgba(0,0,0,.02), 0 14px 30px -16px rgba(60,50,30,.22);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.6);
+    --panel-grad:linear-gradient(163deg,color-mix(in oklab,var(--panel) 86%,var(--bg-2) 14%),var(--panel));
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+    --sky:#2c6fa6; --sky-soft:#e6eef5; --clay:#b06a2a; --good:#237a58; --bad:#a23b3b;
+  }
+  html[data-theme="dark"]{
+    --bg:#13181a; --bg-2:#181e20; --panel:#1d2427; --panel-2:#222a2d;
+    --line:#2b3437; --line-2:#3a4548; --fg:#e9ede9; --fg-dim:#a9b3ab; --mut:#6f7a72;
+    --accent:#40c091; --accent-2:#35a67c; --accent-ink:#eaf6f0;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 16px 34px -14px rgba(0,0,0,.62);
+    --bevel:inset 0 1px 0 rgba(255,255,255,.05);
+    --sky:#5aa0d8; --sky-soft:#182734; --clay:#d0955a; --good:#40c091; --bad:#e0707e;
+  }
+  html[data-theme="dark"] body{background:
+    radial-gradient(1200px 620px at 84% -12%, #17332b 0%, transparent 58%),
+    radial-gradient(1000px 560px at -10% 108%, #16272f 0%, transparent 55%),
+    radial-gradient(1100px 520px at 50% 118%, #241d13 0%, transparent 62%),
+    var(--bg);background-attachment:fixed}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1300px 640px at 82% -14%, #f4e4b6 0%, transparent 56%),
+      linear-gradient(180deg, #f5f3ec 0%, transparent 40%),
+      radial-gradient(900px 520px at -8% 104%, #dbe8d1 0%, transparent 56%),
+      radial-gradient(1300px 560px at 50% 116%, #ebd9b3 0%, transparent 60%),
+      var(--bg);
+    background-attachment:fixed}
+  .wrap{max-width:1060px;margin:0 auto;padding:6px 14px 60px}
+  .topbar{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,color-mix(in oklab,var(--bg) 90%,transparent),color-mix(in oklab,var(--bg) 62%,transparent));backdrop-filter:blur(11px);border-bottom:1px solid var(--line);margin-bottom:18px}
+  .topbar-inner{max-width:1160px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px 14px;flex-wrap:wrap}
+  .mark{display:inline-flex;align-items:center;gap:10px;font-weight:640;letter-spacing:.2px;font-size:16px}
+  .mark .dot{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 34% 32%,#3fbfa2 0%,var(--accent) 46%,var(--accent-2) 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 1px 3px rgba(14,110,92,.4)}
+  .mark small{font-weight:500;color:var(--mut);font-size:12px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font:500 11.5px/1 var(--mono);color:var(--fg-dim);background:var(--panel);border:1px solid var(--line);border-radius:100px;padding:6px 10px;white-space:nowrap}
+  .pill b{color:var(--fg);font-weight:600}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px color-mix(in oklab,var(--accent) 80%,transparent);flex:none}
+  .pill.off{color:var(--mut)} .pill.off .dot{background:var(--mut);box-shadow:none}
+  .pill[hidden]{display:none}
+  .spacer{flex:1}
+  .ctls{display:flex;align-items:center;gap:8px}
+  .ctl{background:linear-gradient(180deg,color-mix(in oklab,var(--panel) 84%,var(--fg-dim) 16%),color-mix(in oklab,var(--panel) 96%,#000 4%));border:1px solid var(--line-2);color:var(--fg-dim);border-radius:var(--r-sm);min-width:34px;height:34px;padding:0 9px;font:inherit;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 2px 6px -3px rgba(0,0,0,.3);transition:color .15s,border-color .15s,filter .15s}
+  .ctl:hover{color:var(--fg);border-color:var(--accent);filter:brightness(1.05)}
+  .ctl.select{padding:0}
+  .ctl select{appearance:none;background:transparent;border:none;color:inherit;font:inherit;font-size:12.5px;padding:0 10px;height:34px;cursor:pointer}
+  .tagline{color:var(--fg-dim);font-size:13.5px;margin:2px 0 18px;max-width:76ch}
+  .tagline b{color:var(--fg);font-weight:600}
+  .streamhead{display:flex;align-items:center;gap:10px;margin:22px 2px 12px}
+  .streamhead h2{font-size:15px;margin:0;letter-spacing:-.01em}
+  .streamhead .bar{flex:1;height:1px;background:var(--line)}
+  .card{background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;box-shadow:var(--bevel),var(--shadow);margin-bottom:12px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .etype{font-size:12.5px;background:var(--sky-soft);color:var(--sky);border:1px solid color-mix(in oklab,var(--sky) 30%,var(--line));border-radius:20px;padding:4px 11px;font-weight:600}
+  .maprow{font-family:var(--mono);font-size:11.5px;color:var(--fg-dim);background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+  .maprow b{color:var(--accent-2)}
+  .tablewrap{overflow-x:auto;background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--bevel),var(--shadow)}
+  table{border-collapse:collapse;width:100%;min-width:560px;font-size:13px}
+  th{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--mut);text-align:left;padding:11px 14px;border-bottom:1px solid var(--line)}
+  td{padding:9px 14px;border-bottom:1px solid var(--line);color:var(--fg-dim)}
+  tr:last-child td{border-bottom:none}
+  td.mono{font-family:var(--mono);font-size:12px}
+  td .pname{font-family:var(--mono);font-size:12.5px;color:var(--accent-2);font-weight:600}
+  .cardin{font:600 10px/1 var(--mono);letter-spacing:.04em;padding:3px 8px;border-radius:100px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg-dim)}
+  .valrange{color:var(--clay);font-family:var(--mono);font-size:12px}
+  .srcmap summary{cursor:pointer;font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:9px;list-style:none}
+  .srcmap summary::-webkit-details-marker{display:none}
+  .srcmap summary::before{content:"▸";color:var(--mut);font-size:11px;transition:transform .12s}
+  .srcmap[open] summary::before{transform:rotate(90deg)}
+  .srcmap .mono-tag{font:600 10.5px var(--mono);color:var(--mut);background:var(--panel-2);border:1px solid var(--line);border-radius:100px;padding:3px 9px}
+  .srcmap .inner{margin-top:12px;display:flex;flex-direction:column;gap:11px}
+  .subh{font:600 10.5px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--mut);margin:0 0 7px}
+  pre.raw{margin:0;font:11.5px/1.55 var(--mono);color:var(--fg-dim);background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 13px;overflow-x:auto}
+  .na{padding:26px 24px;text-align:center}
+  .na .glyph{font-size:26px;color:var(--mut);margin-bottom:8px}
+  .na h3{margin:0 0 6px;font-size:15.5px}
+  .na p{color:var(--fg-dim);font-size:13px;margin:0 auto 16px;max-width:56ch}
+  .btn{font:inherit;font-weight:640;font-size:13.5px;border:1px solid transparent;border-radius:var(--r-sm);padding:9px 15px;cursor:pointer;color:var(--accent-ink);background:linear-gradient(180deg,var(--accent),var(--accent-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.3);transition:filter .15s;text-decoration:none;display:inline-block}
+  .btn:hover{filter:brightness(1.06)}
+  .note{margin-top:16px;padding:11px 13px;background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);font-size:12.5px;color:var(--fg-dim);line-height:1.5;box-shadow:var(--bevel),var(--shadow)}
+  .note a{color:var(--accent-2);font-weight:600}
+  .err{color:var(--bad);font-size:13px;background:color-mix(in oklab,var(--bad) 10%,var(--panel));border:1px solid color-mix(in oklab,var(--bad) 34%,var(--line));border-radius:var(--r-sm);padding:10px 12px;margin:8px 0}
+  .err a{color:inherit}
+  .loading{color:var(--mut);font-size:13px;padding:8px 0}
+  .empty{color:var(--mut);font-size:13px;padding:10px 2px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+  <span class="mark"><span class="dot"></span>Vesicle <small data-i18n="nav_model">model</small></span>
+  <div id="vnav"></div>
+  <span class="pill off" id="connPill" title="StromaDB"><span class="dot"></span><span id="connText">stroma</span></span>
+  <span class="spacer"></span>
+  <div class="ctls">
+    <span class="pill" id="userPill" hidden><span data-i18n="signedIn">signed in</span> <b id="userName"></b></span>
+    <span class="ctl select"><select id="lang" aria-label="language">
+      <option value="en">EN</option><option value="ja">日本語</option><option value="zh">中文</option>
+    </select></span>
+    <button class="ctl" id="themeBtn" title="theme" aria-label="theme">☀</button>
+    <button class="ctl" id="logoutBtn" title="log out" aria-label="log out" data-i18n-title="logout">⏻</button>
+  </div>
+</div></header>
+
+<div class="wrap">
+  <p class="tagline" data-i18n="tagline"></p>
+  <div id="out"><div class="loading" data-i18n="loading"></div></div>
+</div>
+
+<script type="module">
+const $ = (s, r=document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// --- i18n (EN / JA / ZH) ---
+const I18N = {
+  en: {
+    nav_sources: "Sources", nav_sink: "Sink", nav_pipelines: "Pipelines", nav_model: "Model",
+    signedIn: "signed in", logout: "Log out", loading: "Loading…",
+    tagline: "The shared type layer — <b>types and predicates every source maps into</b>. Read-only here; authoring is propose → confirm in the wizard.",
+    na_head: "Model API not available yet",
+    na_desc: "This server doesn't expose GET /api/model yet. The model currently lives in the authoring wizard — propose from a schema, confirm, and apply it there.",
+    open_wizard: "Open the authoring wizard",
+    types_head: "Types", preds_head: "Predicates", maps_head: "Per-source mappings",
+    th_name: "predicate", th_domain: "domain", th_range: "range", th_card: "cardinality",
+    value_range: "value: {v}",
+    entity_types_head: "Entity types", bindings_head: "Bindings",
+    th_binding_pred: "predicate", th_binding_src: "source", th_binding_rest: "details",
+    empty_model: "The model is empty — author one in the wizard.",
+    no_mappings: "No per-source mappings yet.",
+    readonly_note: "Read-only. Propose → confirm authoring lives in the <a href=\"/\">wizard</a>; a confirmed mapping is applied as a one-shot pipeline run.",
+    err_unauthorized: "Sign-in required — <a href=\"/login\">sign in</a> and reload.",
+    err_request: "Request failed: {e}",
+  },
+  ja: {
+    nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル",
+    signedIn: "サインイン中", logout: "ログアウト", loading: "読み込み中…",
+    tagline: "共有型レイヤー — <b>すべてのソースがマッピングされる型と述語</b>。ここは読み取り専用で、作成はウィザードでの提案→確認です。",
+    na_head: "モデル API はまだ利用できません",
+    na_desc: "このサーバーはまだ GET /api/model を公開していません。モデルは現在、作成ウィザード側にあります — スキーマから提案し、確認して適用してください。",
+    open_wizard: "作成ウィザードを開く",
+    types_head: "型", preds_head: "述語", maps_head: "ソース別マッピング",
+    th_name: "述語", th_domain: "domain", th_range: "range", th_card: "カーディナリティ",
+    value_range: "値: {v}",
+    entity_types_head: "エンティティ型", bindings_head: "バインディング",
+    th_binding_pred: "述語", th_binding_src: "ソース", th_binding_rest: "詳細",
+    empty_model: "モデルは空です — ウィザードで作成してください。",
+    no_mappings: "ソース別マッピングはまだありません。",
+    readonly_note: "読み取り専用。提案→確認の作成フローは<a href=\"/\">ウィザード</a>にあり、確認済みマッピングはワンショットのパイプライン実行として適用されます。",
+    err_unauthorized: "サインインが必要です — <a href=\"/login\">サインイン</a>して再読み込みしてください。",
+    err_request: "リクエストに失敗しました: {e}",
+  },
+  zh: {
+    nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型",
+    signedIn: "已登录", logout: "登出", loading: "加载中…",
+    tagline: "共享类型层 — <b>所有数据源映射到的类型与谓词</b>。此处为只读；创建在向导中以提案→确认完成。",
+    na_head: "模型 API 尚不可用",
+    na_desc: "该服务器尚未提供 GET /api/model。模型目前位于创建向导中 — 在那里从模式提案、确认并应用。",
+    open_wizard: "打开创建向导",
+    types_head: "类型", preds_head: "谓词", maps_head: "按数据源的映射",
+    th_name: "谓词", th_domain: "domain", th_range: "range", th_card: "基数",
+    value_range: "值: {v}",
+    entity_types_head: "实体类型", bindings_head: "绑定",
+    th_binding_pred: "谓词", th_binding_src: "来源", th_binding_rest: "详情",
+    empty_model: "模型为空 — 请在向导中创建。",
+    no_mappings: "尚无按数据源的映射。",
+    readonly_note: "只读。提案→确认的创建流程在<a href=\"/\">向导</a>中；确认后的映射将作为一次性管道运行来应用。",
+    err_unauthorized: "需要登录 — 请<a href=\"/login\">登录</a>后重新加载。",
+    err_request: "请求失败: {e}",
+  },
+};
+let LANG = "en";
+function t(k, v) {
+  let s = (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k;
+  if (v) for (const [key, val] of Object.entries(v)) s = s.replaceAll("{" + key + "}", String(val));
+  return s;
+}
+function applyLang() {
+  document.querySelectorAll("[data-i18n]").forEach((e) => { e.innerHTML = t(e.getAttribute("data-i18n")); });
+  document.querySelectorAll("[data-i18n-title]").forEach((e) => { e.title = t(e.getAttribute("data-i18n-title")); });
+  render();
+}
+
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
+let THEME = store.get("vesicle-theme") || "auto";
+const media = window.matchMedia("(prefers-color-scheme: dark)");
+function resolvedDark() { return THEME === "dark" || (THEME === "auto" && media.matches); }
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", resolvedDark() ? "dark" : "light");
+  $("#themeBtn").textContent = resolvedDark() ? "☾" : "☀";
+}
+function setTheme(v) { THEME = v; store.set("vesicle-theme", v); applyTheme(); }
+media.addEventListener?.("change", () => { if (THEME === "auto") applyTheme(); });
+$("#themeBtn").onclick = () => setTheme(resolvedDark() ? "light" : "dark");
+function setLang(l) { LANG = l; store.set("vesicle-lang", l); $("#lang").value = l; applyLang(); }
+LANG = store.get("vesicle-lang") || "en";
+$("#lang").onchange = (e) => setLang(e.target.value);
+$("#logoutBtn").onclick = async () => { await fetch("/api/logout", { method: "POST" }); location.reload(); };
+
+async function refreshStatus() {
+  try {
+    const s = await fetch("/api/status").then((r) => r.json());
+    $("#connPill").classList.toggle("off", !s.stroma);
+    $("#connPill").title = `StromaDB · ${s.url}`;
+    $("#connText").textContent = s.stroma ? "stroma" : "stroma offline";
+    if (s.auth && s.user) { $("#userName").textContent = s.user; $("#userPill").hidden = false; }
+  } catch {
+    $("#connPill").classList.add("off"); $("#connText").textContent = "stroma offline";
+  }
+}
+
+// --- GET /api/model → { model: { types, predicates }, mappings: { sourceId: … } }
+// The endpoint lands on another branch — every state below is reachable and rendered:
+// loading / not-available (404) / unauthorized (401) / request error / empty model / data.
+let STATE = { kind: "loading" };
+
+const name = (x) => typeof x === "string" ? x : (x && typeof x === "object" ? (x.name ?? JSON.stringify(x)) : String(x));
+
+function predRow(p) {
+  const range = p.range != null
+    ? `<span class="etype" style="padding:2px 9px;font-size:11.5px">${esc(name(p.range))}</span>`
+    : (p.range_value != null ? `<span class="valrange">${esc(t("value_range", { v: name(p.range_value) }))}</span>` : "—");
+  return `<tr>
+    <td><span class="pname">${esc(name(p))}</span></td>
+    <td>${p.domain != null ? `<span class="etype" style="padding:2px 9px;font-size:11.5px">${esc(name(p.domain))}</span>` : "—"}</td>
+    <td>${range}</td>
+    <td><span class="cardin">${esc(p.cardinality ?? "—")}</span></td>
+  </tr>`;
+}
+
+function bindingRows(bindings) {
+  return bindings.map((b) => {
+    const { predicate, source, ...rest } = b ?? {};
+    const restStr = Object.keys(rest).length ? JSON.stringify(rest) : "—";
+    return `<tr>
+      <td><span class="pname">${esc(predicate ?? "—")}</span></td>
+      <td class="mono">${esc(source ?? "—")}</td>
+      <td class="mono">${esc(restStr)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function sourceMapping(id, m) {
+  const parts = [];
+  const et = m && typeof m === "object" ? m.entity_types : null;
+  if (et && typeof et === "object" && Object.keys(et).length) {
+    parts.push(`<div><p class="subh">${t("entity_types_head")}</p><div class="chips">${
+      Object.entries(et).map(([k, v]) => `<span class="maprow">${esc(k)} → <b>${esc(name(v))}</b></span>`).join("")
+    }</div></div>`);
+  }
+  const bindings = Array.isArray(m?.bindings) ? m.bindings : null;
+  if (bindings && bindings.length) {
+    parts.push(`<div><p class="subh">${t("bindings_head")}</p><div class="tablewrap"><table>
+      <thead><tr><th>${t("th_binding_pred")}</th><th>${t("th_binding_src")}</th><th>${t("th_binding_rest")}</th></tr></thead>
+      <tbody>${bindingRows(bindings)}</tbody></table></div></div>`);
+  }
+  if (!parts.length) parts.push(`<pre class="raw">${esc(JSON.stringify(m, null, 2))}</pre>`);
+  return `<details class="srcmap card" open>
+    <summary>${esc(id)} <span class="mono-tag">source</span></summary>
+    <div class="inner">${parts.join("")}</div>
+  </details>`;
+}
+
+function render() {
+  const out = $("#out"); if (!out) return;
+  if (STATE.kind === "loading") { out.innerHTML = `<div class="loading">${t("loading")}</div>`; return; }
+  if (STATE.kind === "unavailable") {
+    out.innerHTML = `<div class="card na">
+      <div class="glyph">◎</div>
+      <h3>${t("na_head")}</h3>
+      <p>${t("na_desc")}</p>
+      <a class="btn" href="/">${t("open_wizard")}</a>
+    </div>`;
+    return;
+  }
+  if (STATE.kind === "unauthorized") { out.innerHTML = `<div class="err">${t("err_unauthorized")}</div>`; return; }
+  if (STATE.kind === "error") { out.innerHTML = `<div class="err">${esc(t("err_request", { e: STATE.message }))}</div>`; return; }
+
+  const model = STATE.data.model ?? {};
+  const types = Array.isArray(model.types) ? model.types : [];
+  const preds = Array.isArray(model.predicates) ? model.predicates : [];
+  const mappings = STATE.data.mappings && typeof STATE.data.mappings === "object" ? STATE.data.mappings : {};
+  if (!types.length && !preds.length) {
+    out.innerHTML = `<div class="card na">
+      <div class="glyph">◎</div>
+      <p style="margin-bottom:16px">${t("empty_model")}</p>
+      <a class="btn" href="/">${t("open_wizard")}</a>
+    </div>`;
+    return;
+  }
+  const html = [];
+  html.push(`<div class="streamhead" style="margin-top:2px"><h2>${t("types_head")}</h2><div class="bar"></div></div>`);
+  html.push(`<div class="card"><div class="chips">${types.map((ty) => `<span class="etype">${esc(name(ty))}</span>`).join("") || `<span class="empty">—</span>`}</div></div>`);
+  html.push(`<div class="streamhead"><h2>${t("preds_head")}</h2><div class="bar"></div></div>`);
+  html.push(preds.length
+    ? `<div class="tablewrap"><table>
+        <thead><tr><th>${t("th_name")}</th><th>${t("th_domain")}</th><th>${t("th_range")}</th><th>${t("th_card")}</th></tr></thead>
+        <tbody>${preds.map(predRow).join("")}</tbody></table></div>`
+    : `<div class="empty">—</div>`);
+  html.push(`<div class="streamhead"><h2>${t("maps_head")}</h2><div class="bar"></div></div>`);
+  const entries = Object.entries(mappings);
+  html.push(entries.length ? entries.map(([id, m]) => sourceMapping(id, m)).join("") : `<div class="empty">${t("no_mappings")}</div>`);
+  html.push(`<div class="note">${t("readonly_note")}</div>`);
+  out.innerHTML = html.join("");
+}
+
+async function load() {
+  try {
+    const r = await fetch("/api/model");
+    if (r.status === 404) { STATE = { kind: "unavailable" }; render(); return; }
+    if (r.status === 401) { STATE = { kind: "unauthorized" }; render(); return; }
+    const text = await r.text();
+    let j; try { j = JSON.parse(text); } catch { j = null; }
+    if (!r.ok || !j) { STATE = { kind: "error", message: (j && j.error) || `HTTP ${r.status}` }; render(); return; }
+    STATE = { kind: "data", data: j };
+  } catch (e) {
+    STATE = { kind: "error", message: e.message };
+  }
+  render();
+}
+
+applyTheme();
+setLang(LANG);
+refreshStatus();
+load();
+</script>
+</body>
+</html>
