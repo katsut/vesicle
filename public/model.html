@@ -42,9 +42,9 @@
       radial-gradient(1300px 560px at 50% 116%, #ebd9b3 0%, transparent 60%),
       var(--bg);
     background-attachment:fixed}
-  .wrap{max-width:1060px;margin:0 auto;padding:6px 14px 60px}
+  .wrap{max-width:1400px;margin:0 auto;padding:6px 14px 60px}
   .topbar{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,color-mix(in oklab,var(--bg) 90%,transparent),color-mix(in oklab,var(--bg) 62%,transparent));backdrop-filter:blur(11px);border-bottom:1px solid var(--line);margin-bottom:18px}
-  .topbar-inner{max-width:1160px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px 14px;flex-wrap:wrap}
+  .topbar-inner{max-width:1400px;margin:0 auto;display:flex;align-items:center;gap:11px;padding:9px 14px;flex-wrap:wrap}
   .mark{display:inline-flex;align-items:center;gap:10px;font-weight:640;letter-spacing:.2px;font-size:16px}
   .mark .dot{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 34% 32%,#3fbfa2 0%,var(--accent) 46%,var(--accent-2) 100%);box-shadow:inset 0 0 0 3px rgba(255,255,255,.55),0 1px 3px rgba(14,110,92,.4)}
   .mark small{font-weight:500;color:var(--mut);font-size:12px}
@@ -103,10 +103,10 @@
 </head>
 <body>
 <header class="topbar"><div class="topbar-inner">
-  <span class="mark"><span class="dot"></span>Vesicle <small data-i18n="nav_model">model</small></span>
+  <span class="mark"><span class="dot"></span>Vesicle</span>
   <div id="vnav"></div>
-  <span class="pill off" id="connPill" title="StromaDB"><span class="dot"></span><span id="connText">stroma</span></span>
   <span class="spacer"></span>
+  <span class="pill off" id="connPill" title="StromaDB"><span class="dot"></span><span id="connText">stroma</span></span>
   <div class="ctls">
     <span class="pill" id="userPill" hidden><span data-i18n="signedIn">signed in</span> <b id="userName"></b></span>
     <span class="ctl select"><select id="lang" aria-label="language">
