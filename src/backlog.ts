@@ -60,8 +60,9 @@ const nid = (kind: keyof typeof BASE, id: number): number => BASE[kind] + id;
 
 // Schema is emitted with every batch. Re-sending a type_def / a same-cardinality pred_def is idempotent
 // in the engine, so each webhook stays self-contained and order-independent (defs precede the facts that
-// use them within the batch).
-const SCHEMA: BatchItem[] = [
+// use them within the batch). Exported: the shared type layer seeds itself from these declarations
+// (src/model.ts), so the list lives in exactly one place.
+export const SCHEMA: BatchItem[] = [
   { type_def: { name: "Person" } },
   { type_def: { name: "Project" } },
   { type_def: { name: "Issue" } },

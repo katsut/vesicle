@@ -3,6 +3,7 @@ dist/
 *.log
 .env
 scratch/
+.worktrees/
 
 # runtime connector config — var/config.json holds OAuth tokens (never publish)
 var/
