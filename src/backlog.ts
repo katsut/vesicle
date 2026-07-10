@@ -2,9 +2,9 @@
 //
 // Backlog is a SaaS, not a database, so the stream is its webhook: it POSTs a JSON activity the moment
 // something happens (issue added / updated / commented). This maps one such activity into a *self-
-// contained* ingest batch — schema defs (idempotent) + nodes + facts — that streams straight into the
-// engine's incremental maintenance. Facts carry no provenance here: the sink stamps each one with the
-// id of the pipeline that ingested it (StromaSink.ingest). The LLM is NOT on this path; the
+// contained* ingest batch — schema defs (idempotent) + nodes + facts + closes — that streams straight
+// into the engine's incremental maintenance. Facts carry no provenance here: the sink stamps each one
+// with the id of the pipeline that ingested it (StromaSink.ingest). The LLM is NOT on this path; the
 // source→fact mapping below was decided once (authoring), the runtime is deterministic and token-zero.
 //
 // `status` (and the other issue attributes) are one-cardinality with `valid_from = the event time`, so
@@ -20,6 +20,12 @@ export interface BacklogUser {
   name: string;
   mailAddress?: string | null;
 }
+/** One field diff on an issue-updated activity. Backlog sends string values ("" = empty). */
+export interface BacklogChange {
+  field: string;
+  old_value?: string | null;
+  new_value?: string | null;
+}
 export interface BacklogWebhook {
   /** activity type: 1 = issue created, 2 = issue updated, 3 = issue commented (others: ignored here) */
   type: number;
@@ -31,6 +37,7 @@ export interface BacklogWebhook {
     status?: { id: number; name: string } | null;
     assignee?: BacklogUser | null;
     comment?: { id: number; content: string } | null;
+    changes?: BacklogChange[];
   };
   createdUser: BacklogUser;
   /** ISO-8601, e.g. "2026-07-07T12:34:56Z" */
@@ -38,7 +45,7 @@ export interface BacklogWebhook {
 }
 
 export interface BacklogBatch {
-  /** the ingest batch (schema defs + nodes + facts), empty when the event type is not handled */
+  /** the ingest batch (schema defs + nodes + facts + closes), empty when the event type is not handled */
   items: BatchItem[];
   /** which activity we mapped, for logging */
   kind: "issue-created" | "issue-updated" | "issue-commented" | "ignored";
@@ -80,11 +87,27 @@ export function isoToEpoch(iso: string): number {
   return Number.isFinite(t) ? Math.floor(t / 1000) : 0;
 }
 
+// Which changes[].field values map to a cardinality-one issue predicate this connector emits. Only
+// these can be *closed* when cleared — the snapshot emission above covers replacement, but a value
+// ending with no successor (assignee removed, summary/status blanked) is invisible to it: the field
+// is simply absent from the payload. Backlog names the assignee field "assigner" in change entries;
+// "assignee" is accepted as an alias. Fields the mapping never emits (milestone, priority, …) have
+// no predicate to close and are ignored.
+const CLOSABLE_FIELDS: Record<string, string> = {
+  assigner: "assigned-to",
+  assignee: "assigned-to",
+  summary: "summary",
+  status: "status",
+};
+
+const isEmptyValue = (v: string | null | undefined): boolean => v == null || String(v).trim() === "";
+
 /** Map one Backlog activity to a self-contained ingest batch. Unknown types return `{items:[], kind:"ignored"}`. */
 export function backlogEventToBatch(ev: BacklogWebhook): BacklogBatch {
   const at = isoToEpoch(ev.created);
   const nodes: BatchItem[] = [];
   const facts: BatchItem[] = [];
+  const closes: BatchItem[] = [];
   const seenNodes = new Set<number>();
 
   const node = (kind: keyof typeof BASE, id: number): number => {
@@ -139,9 +162,19 @@ export function backlogEventToBatch(ev: BacklogWebhook): BacklogBatch {
       break;
     }
     case 2: {
-      emitIssue();
+      const issue = emitIssue();
+      // Cessation: a cleared field (old value present → new value empty) ends its one-cardinality
+      // value with no successor. The engine cannot infer that — the snapshot just omits the field —
+      // so emit a close at the event time; as-of reads before it still see the prior value.
+      const closed: string[] = [];
+      for (const ch of ev.content.changes ?? []) {
+        const predicate = CLOSABLE_FIELDS[ch.field];
+        if (!predicate || isEmptyValue(ch.old_value) || !isEmptyValue(ch.new_value)) continue;
+        closes.push({ close: { subject: issue, predicate, valid_from: at } });
+        closed.push(predicate);
+      }
       kind = "issue-updated";
-      summary = `issue ${keyLabel} updated${ev.content.status ? ` → ${ev.content.status.name}` : ""}`;
+      summary = `issue ${keyLabel} updated${ev.content.status ? ` → ${ev.content.status.name}` : ""}${closed.length ? ` (closed ${closed.join(", ")})` : ""}`;
       break;
     }
     case 3: {
@@ -161,5 +194,5 @@ export function backlogEventToBatch(ev: BacklogWebhook): BacklogBatch {
       return { items: [], kind: "ignored", summary: `unhandled activity type ${ev.type}`, factCount: 0 };
   }
 
-  return { items: [...SCHEMA, ...nodes, ...facts], kind, summary, factCount: facts.length };
+  return { items: [...SCHEMA, ...nodes, ...facts, ...closes], kind, summary, factCount: facts.length };
 }
