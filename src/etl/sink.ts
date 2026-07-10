@@ -30,12 +30,14 @@ export class StromaSink implements Sink {
     return this.db.health();
   }
 
-  /** One batch → one durable ingest. Facts without provenance are stamped with the pipeline id. */
+  /** One batch → one durable ingest. Facts and closes without provenance are stamped with the pipeline id. */
   async ingest(batch: BatchItem[], run: { pipelineId: string }): Promise<IngestStats> {
     await this.db.ensureAuthed();
-    const stamped = batch.map((item) =>
-      "fact" in item && item.fact.source == null ? { fact: { ...item.fact, source: run.pipelineId } } : item,
-    );
+    const stamped = batch.map((item) => {
+      if ("fact" in item && item.fact.source == null) return { fact: { ...item.fact, source: run.pipelineId } };
+      if ("close" in item && item.close.source == null) return { close: { ...item.close, source: run.pipelineId } };
+      return item;
+    });
     return this.db.ingest(toNdjson(stamped));
   }
 
