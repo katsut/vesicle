@@ -5,8 +5,9 @@
 // older event after a newer one, leaving a stale value as head. As-of reads are unaffected (they
 // resolve by valid_from), so dropping late events would trade history completeness for head
 // correctness — instead the late batch is ingested unchanged, and the displaced current winner is
-// re-asserted afterwards (same subject/predicate/object/valid_from) so it regains head by a newer
-// write. The in-order path (incoming >= current, or no current value) produces zero extra writes.
+// re-asserted afterwards (same subject/predicate/object/valid_from — or the close, when the head was
+// ended: the engine reports the boundary as closed_from) so it regains head by a newer write. The
+// in-order path (incoming >= current, or a never-written key) produces zero extra writes.
 //
 // Reads use the raw Stroma client (reads live outside the Sink interface); the batch and the
 // follow-up re-assertions go through sink.ingest with the same pipeline id.
@@ -15,12 +16,15 @@ import type { PointRecord, Stroma } from "../stroma.ts";
 import type { IngestStats, Sink } from "./sink.ts";
 import type { BatchItem, FactObject } from "./types.ts";
 
-/** One head repair: the current winner re-asserted after a late-arriving batch displaced it. */
+/** One head repair: the current winner re-asserted after a late-arriving batch displaced it. The
+ *  winner is a value fact (`object` set) or a close (`object` absent — the head was ended and a late
+ *  fact must not resurrect it). */
 export interface Repair {
   subject: number;
   predicate: string;
-  object: FactObject;
-  /** the winner's own valid_from, unchanged — the repair only refreshes write order */
+  object?: FactObject;
+  /** the winner's own valid_from (a value's, or the close boundary), unchanged — the repair only
+   *  refreshes write order */
   validFrom: number;
   /** the late batch's valid_from that would otherwise have taken head */
   incomingValidFrom: number;
@@ -66,20 +70,30 @@ export async function repairLateArrivals(db: Stroma, sink: Sink, batch: BatchIte
       if ((e as Error).message.includes("unknown predicate")) continue;
       throw e;
     }
-    // in-order (incoming >= current) or no current value/valid_from: nothing to repair
-    if (!cur.one || cur.valid_from == null || cur.valid_from <= inc.validFrom) continue;
-    const object: FactObject | null = cur.one.node != null ? { node: cur.one.node } : cur.one.text != null ? { text: cur.one.text } : null;
-    if (!object) continue;
-    repairs.push({ subject: inc.subject, predicate: inc.predicate, object, validFrom: cur.valid_from, incomingValidFrom: inc.validFrom });
+    // The current winner is a live value (valid_from) or a close (closed_from). In-order
+    // (incoming >= current) or never-written: nothing to repair.
+    const curVf = cur.one ? cur.valid_from : cur.closed_from;
+    if (curVf == null || curVf <= inc.validFrom) continue;
+    if (cur.one) {
+      const object: FactObject | null = cur.one.node != null ? { node: cur.one.node } : cur.one.text != null ? { text: cur.one.text } : null;
+      if (!object) continue;
+      repairs.push({ subject: inc.subject, predicate: inc.predicate, object, validFrom: curVf, incomingValidFrom: inc.validFrom });
+    } else {
+      // the head was ended by a newer close — re-assert the close so the late value doesn't resurrect it
+      repairs.push({ subject: inc.subject, predicate: inc.predicate, validFrom: curVf, incomingValidFrom: inc.validFrom });
+    }
   }
 
   // Ingest the batch unchanged (history/as-of stays complete), then re-assert the displaced winners
-  // as one follow-up batch through the same sink + pipeline id.
+  // as one follow-up batch through the same sink + pipeline id — a value as a fact, an ended head as
+  // a close.
   const stats = await sink.ingest(batch, run);
   if (repairs.length) {
-    const followUp: BatchItem[] = repairs.map((r) => ({
-      fact: { subject: r.subject, predicate: r.predicate, object: r.object, valid_from: r.validFrom },
-    }));
+    const followUp: BatchItem[] = repairs.map((r) =>
+      r.object
+        ? { fact: { subject: r.subject, predicate: r.predicate, object: r.object, valid_from: r.validFrom } }
+        : { close: { subject: r.subject, predicate: r.predicate, valid_from: r.validFrom } },
+    );
     await sink.ingest(followUp, run);
   }
   return { stats, repairs };
