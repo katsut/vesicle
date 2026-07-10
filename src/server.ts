@@ -28,6 +28,7 @@ import { review, type Rule } from "./conformance.ts";
 import { recordReview, type Decision } from "./review.ts";
 import { authorizeUrl, exchangeCode } from "./backlog-oauth.ts";
 import { StromaSink, type IngestStats } from "./etl/sink.ts";
+import { repairLateArrivals, type Repair } from "./etl/guard.ts";
 import { BacklogSource } from "./etl/source.ts";
 import { loadConfig, recordRun, saveConfig, type PipelineDef } from "./etl/store.ts";
 import type { DerivedRelation, Mapping } from "./types.ts";
@@ -52,7 +53,14 @@ const DEFAULT_ID = "hr-sample"; // the source shown first / used when a request 
 // Backlog source normalizes both transports (webhook push + poll pull) into the same batches.
 // Read/query paths (payoff expand, conformance, evaluate) keep using the Stroma client directly.
 const sink = new StromaSink(new Stroma(loadConfig().sink.url));
+const guardDb = new Stroma(loadConfig().sink.url); // late-arrival guard reads — reads stay on the raw client
 const backlogSource = new BacklogSource();
+
+const logRepairs = (pipelineId: string, repairs: Repair[]): void => {
+  for (const r of repairs) {
+    console.log(`  late-arrival repair (${pipelineId}): re-asserted head of ${r.subject} "${r.predicate}" (current valid_from ${r.validFrom} > incoming ${r.incomingValidFrom})`);
+  }
+};
 
 type Rows = Record<string, Array<Record<string, unknown>>>;
 interface Source {
@@ -179,7 +187,9 @@ app.post("/api/webhook/backlog", async (req, res) => {
     if (!(await sink.health())) {
       return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
     }
-    const stats = await sink.ingest(batch.items, { pipelineId: backlogSource.id });
+    // Webhook delivery can arrive out of order (redelivery/parallelism) — the guard repairs head.
+    const { stats, repairs } = await repairLateArrivals(guardDb, sink, batch.items, { pipelineId: backlogSource.id });
+    logRepairs(backlogSource.id, repairs);
     console.log(`  /api/webhook/backlog → ${batch.kind}: ${batch.summary}`);
     res.json({ ok: true, kind: batch.kind, summary: batch.summary, facts: batch.factCount, stats });
   } catch (e) {
@@ -351,7 +361,10 @@ async function pollOnce(pipelineId: string): Promise<void> {
     for (const e of events) {
       const batch = backlogSource.eventToBatch(e);
       if (batch.items.length) {
-        await sink.ingest(batch.items, { pipelineId });
+        // Poll delivery is ordered, so the guard is a no-op here in the common case — it protects
+        // against upstream reordering and cursor rewinds.
+        const { repairs } = await repairLateArrivals(guardDb, sink, batch.items, { pipelineId });
+        logRepairs(pipelineId, repairs);
         facts += batch.factCount;
       }
       if (e.id > cursor) cursor = e.id;
