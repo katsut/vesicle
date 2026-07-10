@@ -1,7 +1,7 @@
 // Persisted connector config — var/config.json. Runtime state, not code: the sink URL, one connection
-// per source (OAuth tokens live here, so var/ is git-ignored), and pipelines (kept empty until
-// pipeline definitions land). Loaded once into an in-memory cache; every save writes a tmp file and
-// renames it into place, so a crash never leaves a torn file.
+// per source (OAuth tokens live here, so var/ is git-ignored), pipeline definitions, and their run
+// history. Loaded once into an in-memory cache; every save writes a tmp file and renames it into
+// place, so a crash never leaves a torn file.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -19,12 +19,51 @@ export interface BacklogConnection {
   projectKey?: string;
 }
 
+/** One persisted ingestion lane: a single source wired into the sink, with lifecycle and counters.
+ *  The pipeline id doubles as the provenance value the sink stamps on facts (see StromaSink.ingest),
+ *  so the default Backlog poll lane uses id "backlog" — the wire value the graph already contains. */
+export interface PipelineDef {
+  id: string;
+  name: string;
+  /** source id, e.g. "backlog" */
+  source: string;
+  mode: "poll" | "webhook" | "one-shot";
+  /** what the lane reads from its source, e.g. a Backlog project id/key */
+  scope?: string;
+  /** lifecycle: a running poll lane is resumed on boot; a paused one is not */
+  state: "running" | "paused";
+  /** last seen upstream event id (poll mode); reset when the scope changes */
+  cursor?: number;
+  /** facts ingested since the cursor was last reset */
+  ingested?: number;
+  /** unix-ms of the last poll cycle that saw events */
+  lastEventAt?: number;
+  lastError?: string | null;
+}
+
+/** One recorded execution. Live poll lanes do NOT append a run per cycle (they update counters on
+ *  their PipelineDef); one-shot applies append one run each. "backfill" is reserved — nothing
+ *  produces it yet. */
+export interface PipelineRun {
+  pipelineId: string;
+  kind: "live" | "one-shot" | "backfill";
+  startedAt: number;
+  finishedAt: number;
+  events: number;
+  facts: number;
+  error?: string | null;
+}
+
 export interface ConnectorConfig {
   sink: { url?: string };
   sources: { backlog?: BacklogConnection };
-  /** pipeline definitions — kept empty for now */
-  pipelines: unknown[];
+  pipelines: PipelineDef[];
+  /** run history, most-recent first, capped at RUNS_CAP */
+  runs: PipelineRun[];
 }
+
+/** How many runs the store keeps (append via recordRun evicts the oldest beyond this). */
+export const RUNS_CAP = 50;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const VAR_DIR = resolve(HERE, "../../var");
@@ -45,7 +84,7 @@ export function loadConfig(): ConnectorConfig {
       console.warn(`config store: could not read ${FILE}: ${(e as Error).message} — starting empty`);
     }
   }
-  cache = { sink: raw.sink ?? {}, sources: raw.sources ?? {}, pipelines: raw.pipelines ?? [] };
+  cache = { sink: raw.sink ?? {}, sources: raw.sources ?? {}, pipelines: raw.pipelines ?? [], runs: raw.runs ?? [] };
   return cache;
 }
 
@@ -58,4 +97,12 @@ export function saveConfig(mutate: (cfg: ConnectorConfig) => void): ConnectorCon
   writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n");
   renameSync(tmp, FILE);
   return cfg;
+}
+
+/** Prepend one run to the history and persist (append-only, most-recent first, capped). */
+export function recordRun(run: PipelineRun): void {
+  saveConfig((cfg) => {
+    cfg.runs.unshift(run);
+    if (cfg.runs.length > RUNS_CAP) cfg.runs.length = RUNS_CAP;
+  });
 }

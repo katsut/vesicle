@@ -27,9 +27,9 @@ import { checkDerivedPath, evaluateDerived } from "./deriveEval.ts";
 import { review, type Rule } from "./conformance.ts";
 import { recordReview, type Decision } from "./review.ts";
 import { authorizeUrl, exchangeCode } from "./backlog-oauth.ts";
-import { StromaSink } from "./etl/sink.ts";
+import { StromaSink, type IngestStats } from "./etl/sink.ts";
 import { BacklogSource } from "./etl/source.ts";
-import { loadConfig, saveConfig } from "./etl/store.ts";
+import { loadConfig, recordRun, saveConfig, type PipelineDef } from "./etl/store.ts";
 import type { DerivedRelation, Mapping } from "./types.ts";
 
 // Default decision-authority policy: a release must be approved by the manager of the assignee's
@@ -327,51 +327,106 @@ app.post("/api/backlog/webhook", async (req, res) => {
 
 // Polling ingest (pull) — the tunnel-free path: the server periodically fetches recent Backlog
 // activities over OAuth (outbound only) and streams them into StromaDB. No public URL needed, unlike
-// the webhook (push). Same event→batch mapping consumes both shapes. Poll runtime state is a
-// module-level singleton keyed by source id — one poller per source, not per session.
-const pollers = new Map<string, { project: string; timer: ReturnType<typeof setInterval>; lastId: number; ingested: number; busy: boolean; error: string | null }>();
+// the webhook (push). Same event→batch mapping consumes both shapes.
+//
+// The lane itself is a persisted PipelineDef in the config store: scope, cursor, counters, and
+// lifecycle state survive a restart, and the cursor advances durably each cycle so a resumed lane
+// picks up where it stopped. Runtime holds only what cannot be persisted — the interval timer and a
+// busy flag — keyed by pipeline id, one poller per lane, not per session.
+const pollTimers = new Map<string, { timer: ReturnType<typeof setInterval>; busy: boolean }>();
 const POLL_MS = Number(process.env.BACKLOG_POLL_MS ?? 15000);
 
-async function pollOnce(sourceId: string): Promise<void> {
-  const st = pollers.get(sourceId);
-  const c = loadConfig().sources.backlog;
-  if (!st || !c || st.busy) return;
-  st.busy = true;
+const pipelineById = (id: string): PipelineDef | undefined => loadConfig().pipelines.find((p) => p.id === id);
+
+async function pollOnce(pipelineId: string): Promise<void> {
+  const rt = pollTimers.get(pipelineId);
+  const def = pipelineById(pipelineId);
+  const conn = loadConfig().sources.backlog; // the only poll-capable source today
+  if (!rt || rt.busy || !def?.scope || !conn) return;
+  rt.busy = true;
   try {
-    const { events } = await backlogSource.poll(c, st.project, st.lastId);
-    if (events.length) {
-      for (const e of events) {
-        const batch = backlogSource.eventToBatch(e);
-        if (batch.items.length) {
-          await sink.ingest(batch.items, { pipelineId: sourceId });
-          st.ingested += batch.factCount;
-        }
-        if (e.id > st.lastId) st.lastId = e.id;
+    let cursor = def.cursor ?? 0;
+    let facts = 0;
+    const { events } = await backlogSource.poll(conn, def.scope, cursor);
+    for (const e of events) {
+      const batch = backlogSource.eventToBatch(e);
+      if (batch.items.length) {
+        await sink.ingest(batch.items, { pipelineId });
+        facts += batch.factCount;
       }
-      console.log(`  backlog poll (${st.project}): ${events.length} new activities → lastId ${st.lastId}, ${st.ingested} facts total`);
+      if (e.id > cursor) cursor = e.id;
     }
-    st.error = null;
+    // A live lane appends no run per cycle — it advances the durable counters on its def instead.
+    const saved = saveConfig((cfg) => {
+      const d = cfg.pipelines.find((p) => p.id === pipelineId);
+      if (!d) return;
+      d.cursor = cursor;
+      d.ingested = (d.ingested ?? 0) + facts;
+      if (events.length) d.lastEventAt = Date.now();
+      d.lastError = null;
+    });
+    if (events.length) {
+      const total = saved.pipelines.find((p) => p.id === pipelineId)?.ingested ?? facts;
+      console.log(`  backlog poll (${def.scope}): ${events.length} new activities → cursor ${cursor}, ${total} facts total`);
+    }
   } catch (e) {
-    st.error = (e as Error).message;
-    console.log(`  backlog poll error: ${st.error}`);
+    saveConfig((cfg) => {
+      const d = cfg.pipelines.find((p) => p.id === pipelineId);
+      if (d) d.lastError = (e as Error).message;
+    });
+    console.log(`  backlog poll error: ${(e as Error).message}`);
   } finally {
-    st.busy = false;
+    rt.busy = false;
   }
+}
+
+function startPoller(pipelineId: string): void {
+  stopPoller(pipelineId);
+  pollTimers.set(pipelineId, { timer: setInterval(() => void pollOnce(pipelineId), POLL_MS), busy: false });
+  void pollOnce(pipelineId); // kick off immediately
+}
+
+function stopPoller(pipelineId: string): void {
+  const rt = pollTimers.get(pipelineId);
+  if (!rt) return;
+  clearInterval(rt.timer);
+  pollTimers.delete(pipelineId);
 }
 
 app.post("/api/backlog/poll/start", (req, res) => {
   try {
-    const c = loadConfig().sources.backlog;
-    if (!c) return res.status(400).json({ error: "not connected to Backlog" });
+    if (!loadConfig().sources.backlog) return res.status(400).json({ error: "not connected to Backlog" });
     const project = String(req.body?.project ?? "").trim();
     if (!project) return res.status(400).json({ error: "missing project" });
-    const existing = pollers.get(backlogSource.id);
-    if (existing) clearInterval(existing.timer);
-    pollers.set(backlogSource.id, { project, timer: setInterval(() => void pollOnce(backlogSource.id), POLL_MS), lastId: 0, ingested: 0, busy: false, error: null });
+    // Upsert the lane. Same scope keeps the cursor (a restart resumes the stream); a new scope
+    // rewinds to 0. The id "backlog" doubles as the provenance value the sink stamps on facts.
     saveConfig((cfg) => {
+      const def = cfg.pipelines.find((p) => p.id === backlogSource.id);
+      if (def) {
+        if (def.scope !== project) {
+          def.scope = project;
+          def.cursor = 0;
+          def.ingested = 0;
+        }
+        def.name = `${backlogSource.label} · ${project}`;
+        def.state = "running";
+        def.lastError = null;
+      } else {
+        cfg.pipelines.push({
+          id: backlogSource.id,
+          name: `${backlogSource.label} · ${project}`,
+          source: backlogSource.id,
+          mode: "poll",
+          scope: project,
+          state: "running",
+          cursor: 0,
+          ingested: 0,
+          lastError: null,
+        });
+      }
       if (cfg.sources.backlog) cfg.sources.backlog.projectKey = project;
     });
-    void pollOnce(backlogSource.id); // kick off immediately
+    startPoller(backlogSource.id);
     res.json({ ok: true, project, intervalMs: POLL_MS });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
@@ -379,18 +434,38 @@ app.post("/api/backlog/poll/start", (req, res) => {
 });
 
 app.post("/api/backlog/poll/stop", (_req, res) => {
-  const st = pollers.get(backlogSource.id);
-  if (st) {
-    clearInterval(st.timer);
-    pollers.delete(backlogSource.id);
-  }
+  stopPoller(backlogSource.id);
+  saveConfig((cfg) => {
+    const def = cfg.pipelines.find((p) => p.id === backlogSource.id);
+    if (def) def.state = "paused"; // keep the cursor — a later start on the same scope resumes
+  });
   res.json({ ok: true });
 });
 
 app.get("/api/backlog/poll/status", (_req, res) => {
-  const st = pollers.get(backlogSource.id);
-  res.json({ running: !!st, project: st?.project ?? null, ingested: st?.ingested ?? 0, lastId: st?.lastId ?? 0, error: st?.error ?? null });
+  const def = pipelineById(backlogSource.id);
+  const running = def?.state === "running" && pollTimers.has(backlogSource.id);
+  res.json({ running, project: def?.scope ?? null, ingested: def?.ingested ?? 0, lastId: def?.cursor ?? 0, error: def?.lastError ?? null });
 });
+
+// All persisted lanes plus the capped run history — the read model for the pipelines UI. Additive:
+// the per-source endpoints above keep serving the existing pages.
+app.get("/api/pipelines", (_req, res) => {
+  const cfg = loadConfig();
+  res.json({ pipelines: cfg.pipelines, runs: cfg.runs });
+});
+
+// Boot restore: resume every poll lane that was left running and still has its source connected — a
+// server restart must not silently stop a stream (the persisted cursor picks up where it stopped).
+for (const def of loadConfig().pipelines) {
+  if (def.mode !== "poll" || def.state !== "running") continue;
+  if (def.source === "backlog" && !loadConfig().sources.backlog) {
+    console.log(`  pipeline "${def.id}": left running but ${def.source} is not connected — not resumed`);
+    continue;
+  }
+  startPoller(def.id);
+  console.log(`  pipeline "${def.id}": resumed polling ${def.scope ?? "?"} every ${POLL_MS / 1000}s`);
+}
 
 // POST /api/conformance → { rule? } evaluate the declared decision-authority rule in the engine
 // (deterministic, no LLM) and return a human-reviewable report of the gaps (ABSENT + MISMATCH).
@@ -497,8 +572,19 @@ app.post("/api/apply", async (req, res) => {
     }
     // Incremental load: apply never wipes the graph (other pipelines feed the same one). Node ids are
     // deterministic per source, so re-applying the same data converges instead of duplicating. A full
-    // wipe is the explicit admin action POST /api/sink/reset.
-    const stats = await sink.ingest(tr.items, { pipelineId: "apply" });
+    // wipe is the explicit admin action POST /api/sink/reset. Each apply is a one-shot run in the
+    // store's history: source rows in, facts out, stamped with provenance "apply" by the sink.
+    const startedAt = Date.now();
+    const events = Object.values(data).reduce((n, rows) => n + rows.length, 0);
+    const facts = tr.items.filter((item) => "fact" in item).length;
+    let stats: IngestStats;
+    try {
+      stats = await sink.ingest(tr.items, { pipelineId: "apply" });
+    } catch (e) {
+      recordRun({ pipelineId: "apply", kind: "one-shot", startedAt, finishedAt: Date.now(), events, facts: 0, error: (e as Error).message });
+      throw e;
+    }
+    recordRun({ pipelineId: "apply", kind: "one-shot", startedAt, finishedAt: Date.now(), events, facts, error: null });
 
     const out: Record<string, unknown> = { stats, gaps: tr.gaps };
 

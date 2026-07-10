@@ -2,9 +2,10 @@
 //
 // Backlog is a SaaS, not a database, so the stream is its webhook: it POSTs a JSON activity the moment
 // something happens (issue added / updated / commented). This maps one such activity into a *self-
-// contained* ingest batch — schema defs (idempotent) + nodes + provenance-stamped facts — that streams
-// straight into the engine's incremental maintenance. The LLM is NOT on this path; the source→fact
-// mapping below was decided once (authoring), the runtime is deterministic and token-zero.
+// contained* ingest batch — schema defs (idempotent) + nodes + facts — that streams straight into the
+// engine's incremental maintenance. Facts carry no provenance here: the sink stamps each one with the
+// id of the pipeline that ingested it (StromaSink.ingest). The LLM is NOT on this path; the
+// source→fact mapping below was decided once (authoring), the runtime is deterministic and token-zero.
 //
 // `status` (and the other issue attributes) are one-cardinality with `valid_from = the event time`, so
 // each update supersedes the prior value and *keeps the interval* — you can later ask the engine for the
@@ -45,8 +46,6 @@ export interface BacklogBatch {
   summary: string;
   factCount: number;
 }
-
-const SOURCE = "backlog";
 
 // Node-id namespaces: Backlog ids are per-entity, so offset by type to keep them globally unique.
 const BASE = { Person: 1_000_000_000, Project: 2_000_000_000, Issue: 3_000_000_000, Comment: 4_000_000_000 } as const;
@@ -97,7 +96,7 @@ export function backlogEventToBatch(ev: BacklogWebhook): BacklogBatch {
     return gid;
   };
   const fact = (subject: number, predicate: string, object: FactObject): void => {
-    facts.push({ fact: { subject, predicate, object, valid_from: at, source: SOURCE } });
+    facts.push({ fact: { subject, predicate, object, valid_from: at } });
   };
 
   const person = (u: BacklogUser): number => {
