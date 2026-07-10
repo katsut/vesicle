@@ -208,6 +208,7 @@ app.get("/api/stroma-stats", async (_req, res) => {
   const s = new Stroma();
   if (!(await s.health())) return res.json({ reachable: false });
   try {
+    await s.ensureAuthed();
     const st = await s.stats();
     res.json({ reachable: true, stats: st });
   } catch (e) {
