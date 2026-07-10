@@ -12,6 +12,7 @@ import { parseSchema } from "../schema.ts";
 import { proposeMapping } from "../propose.ts";
 import { transform } from "../transform.ts";
 import { Stroma } from "../stroma.ts";
+import { toNdjson } from "../etl/sink.ts";
 import { planPayoff, runPayoff } from "../payoff.ts";
 import { activeBackend } from "../llm.ts";
 import { scoreMapping } from "../score.ts";
@@ -42,9 +43,9 @@ async function main() {
   console.log(`   source_capture: ${(sc.sourceCapture * 100).toFixed(0)}%   critical predicates present: ${sc.criticalPresent ? "yes" : "NO"}`);
   console.log(`   downstream recall@5: ${sc.recall.toFixed(2)}   precision@5: ${sc.precision.toFixed(2)}   type-violations: ${sc.typeViolations}`);
 
-  console.log(`\n▸ 4. Transform rows → StromaDB NDJSON`);
+  console.log(`\n▸ 4. Transform rows → StromaDB ingest records`);
   const tr = transform(schema, mapping, data);
-  const factCount = tr.ndjson.split("\n").filter((l) => l.includes('"fact"')).length;
+  const factCount = tr.items.filter((i) => "fact" in i).length;
   console.log(`   ${factCount} facts, ${Object.values(tr.idMap).reduce((n, m) => n + Object.keys(m).length, 0)} nodes`);
   if (tr.gaps.length) {
     console.log(`   engine gaps (proposed but not yet ingestable):`);
@@ -64,7 +65,7 @@ async function main() {
 
   console.log(`\n▸ 5. Ingest into StromaDB`);
   await db.ensureAuthed(); // API token if STROMA_API_TOKEN is set, else session login
-  const stats = await db.ingest(tr.ndjson);
+  const stats = await db.ingest(toNdjson(tr.items));
   console.log(`   ${JSON.stringify(stats)}`);
 
   console.log(`\n▸ 6. Payoff query on the REAL ingested graph: staff "ML Recommender"`);

@@ -1,4 +1,4 @@
-// Backlog (Nulab) webhook → StromaDB ingest NDJSON.
+// Backlog (Nulab) webhook → StromaDB ingest batch.
 //
 // Backlog is a SaaS, not a database, so the stream is its webhook: it POSTs a JSON activity the moment
 // something happens (issue added / updated / commented). This maps one such activity into a *self-
@@ -10,6 +10,8 @@
 // each update supersedes the prior value and *keeps the interval* — you can later ask the engine for the
 // status as-of any instant. That valid-time history is the point of streaming into StromaDB rather than
 // overwriting a row.
+
+import type { BatchItem, FactObject } from "./etl/types.ts";
 
 /** The subset of a Backlog webhook activity we read. Backlog sends more; extra fields are ignored. */
 export interface BacklogUser {
@@ -35,8 +37,8 @@ export interface BacklogWebhook {
 }
 
 export interface BacklogBatch {
-  /** the ingest body (schema defs + nodes + facts), or "" when the event type is not handled */
-  ndjson: string;
+  /** the ingest batch (schema defs + nodes + facts), empty when the event type is not handled */
+  items: BatchItem[];
   /** which activity we mapped, for logging */
   kind: "issue-created" | "issue-updated" | "issue-commented" | "ignored";
   /** one-line human summary */
@@ -53,7 +55,7 @@ const nid = (kind: keyof typeof BASE, id: number): number => BASE[kind] + id;
 // Schema is emitted with every batch. Re-sending a type_def / a same-cardinality pred_def is idempotent
 // in the engine, so each webhook stays self-contained and order-independent (defs precede the facts that
 // use them within the batch).
-const SCHEMA: string[] = [
+const SCHEMA: BatchItem[] = [
   { type_def: { name: "Person" } },
   { type_def: { name: "Project" } },
   { type_def: { name: "Issue" } },
@@ -71,7 +73,7 @@ const SCHEMA: string[] = [
   { pred_def: { name: "content", cardinality: "one", domain: "Comment", range_value: "text" } },
   { pred_def: { name: "on-issue", cardinality: "one", domain: "Comment", range: "Issue" } },
   { pred_def: { name: "commented-by", cardinality: "one", domain: "Comment", range: "Person" } },
-].map((r) => JSON.stringify(r));
+];
 
 /** ISO-8601 → epoch seconds (the engine's valid_from), or 0 when unparseable. */
 export function isoToEpoch(iso: string): number {
@@ -79,25 +81,23 @@ export function isoToEpoch(iso: string): number {
   return Number.isFinite(t) ? Math.floor(t / 1000) : 0;
 }
 
-type Obj = { node: number } | { text: string };
-
-/** Map one Backlog activity to a self-contained ingest batch. Unknown types return `{ndjson:"", kind:"ignored"}`. */
+/** Map one Backlog activity to a self-contained ingest batch. Unknown types return `{items:[], kind:"ignored"}`. */
 export function backlogEventToBatch(ev: BacklogWebhook): BacklogBatch {
   const at = isoToEpoch(ev.created);
-  const nodes: string[] = [];
-  const facts: string[] = [];
+  const nodes: BatchItem[] = [];
+  const facts: BatchItem[] = [];
   const seenNodes = new Set<number>();
 
   const node = (kind: keyof typeof BASE, id: number): number => {
     const gid = nid(kind, id);
     if (!seenNodes.has(gid)) {
-      nodes.push(JSON.stringify({ node: { id: gid, type: kind } }));
+      nodes.push({ node: { id: gid, type: kind } });
       seenNodes.add(gid);
     }
     return gid;
   };
-  const fact = (subject: number, predicate: string, object: Obj): void => {
-    facts.push(JSON.stringify({ fact: { subject, predicate, object, valid_from: at, source: SOURCE } }));
+  const fact = (subject: number, predicate: string, object: FactObject): void => {
+    facts.push({ fact: { subject, predicate, object, valid_from: at, source: SOURCE } });
   };
 
   const person = (u: BacklogUser): number => {
@@ -159,9 +159,8 @@ export function backlogEventToBatch(ev: BacklogWebhook): BacklogBatch {
       break;
     }
     default:
-      return { ndjson: "", kind: "ignored", summary: `unhandled activity type ${ev.type}`, factCount: 0 };
+      return { items: [], kind: "ignored", summary: `unhandled activity type ${ev.type}`, factCount: 0 };
   }
 
-  const ndjson = [...SCHEMA, ...nodes, ...facts].join("\n") + "\n";
-  return { ndjson, kind, summary, factCount: facts.length };
+  return { items: [...SCHEMA, ...nodes, ...facts], kind, summary, factCount: facts.length };
 }

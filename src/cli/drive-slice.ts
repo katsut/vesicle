@@ -16,6 +16,7 @@ import { parseSchema } from "../schema.ts";
 import { proposeMapping } from "../propose.ts";
 import { transform } from "../transform.ts";
 import { Stroma } from "../stroma.ts";
+import { toNdjson } from "../etl/sink.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, "../../sources/google-drive.json");
@@ -46,7 +47,7 @@ async function main() {
   await db.ensureAuthed();
   await db.reset();
   console.log(`\n▸ 4. Ingest into StromaDB`);
-  console.log(`   ${JSON.stringify(await db.ingest(tr.ndjson))}`);
+  console.log(`   ${JSON.stringify(await db.ingest(toNdjson(tr.items)))}`);
 
   // file gid → {name, label}
   const fileType = mapping.entity_types["files"];

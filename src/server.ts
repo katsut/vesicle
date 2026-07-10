@@ -26,9 +26,10 @@ import { planPayoff, runPayoff } from "./payoff.ts";
 import { checkDerivedPath, evaluateDerived } from "./deriveEval.ts";
 import { review, type Rule } from "./conformance.ts";
 import { recordReview, type Decision } from "./review.ts";
-import { backlogEventToBatch, type BacklogWebhook } from "./backlog.ts";
 import { authorizeUrl, exchangeCode } from "./backlog-oauth.ts";
-import { listProjects, registerWebhook, listActivities, ISSUE_ACTIVITY_TYPES } from "./backlog-api.ts";
+import { StromaSink } from "./etl/sink.ts";
+import { BacklogSource } from "./etl/source.ts";
+import { loadConfig, saveConfig } from "./etl/store.ts";
 import type { DerivedRelation, Mapping } from "./types.ts";
 
 // Default decision-authority policy: a release must be approved by the manager of the assignee's
@@ -46,6 +47,12 @@ const PUB = resolve(HERE, "../public");
 const SOURCES_DIR = resolve(HERE, "../sources");
 const PORT = Number(process.env.PORT ?? 5178);
 const DEFAULT_ID = "hr-sample"; // the source shown first / used when a request omits schema/data
+
+// ETL wiring: one shared sink for every engine write path (webhook ingest, poll ingest, apply); the
+// Backlog source normalizes both transports (webhook push + poll pull) into the same batches.
+// Read/query paths (payoff expand, conformance, evaluate) keep using the Stroma client directly.
+const sink = new StromaSink(new Stroma(loadConfig().sink.url));
+const backlogSource = new BacklogSource();
 
 type Rows = Record<string, Array<Record<string, unknown>>>;
 interface Source {
@@ -165,18 +172,14 @@ app.post("/api/webhook/backlog", async (req, res) => {
   const secret = process.env.BACKLOG_WEBHOOK_SECRET;
   if (secret && req.query.secret !== secret) return res.status(401).json({ error: "bad webhook secret" });
   try {
-    const ev = req.body as BacklogWebhook | undefined;
-    if (!ev || typeof ev.type !== "number" || !ev.content || !ev.project) {
-      return res.status(400).json({ error: "not a Backlog webhook activity" });
-    }
-    const batch = backlogEventToBatch(ev);
-    if (!batch.ndjson) return res.json({ ok: true, kind: batch.kind, facts: 0, note: batch.summary });
-    const db = new Stroma();
-    if (!(await db.health())) {
+    const event = backlogSource.webhookToEvents(req.body)?.[0];
+    if (!event) return res.status(400).json({ error: "not a Backlog webhook activity" });
+    const batch = backlogSource.eventToBatch(event);
+    if (!batch.items.length) return res.json({ ok: true, kind: batch.kind, facts: 0, note: batch.summary });
+    if (!(await sink.health())) {
       return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
     }
-    await db.ensureAuthed();
-    const stats = await db.ingest(batch.ndjson);
+    const stats = await sink.ingest(batch.items, { pipelineId: backlogSource.id });
     console.log(`  /api/webhook/backlog → ${batch.kind}: ${batch.summary}`);
     res.json({ ok: true, kind: batch.kind, summary: batch.summary, facts: batch.factCount, stats });
   } catch (e) {
@@ -205,20 +208,18 @@ app.get("/api/status", async (_req, res) => {
 
 // Live pipeline view polls this: engine reachability + write counters (a rising changelog head = facts streaming in).
 app.get("/api/stroma-stats", async (_req, res) => {
-  const s = new Stroma();
-  if (!(await s.health())) return res.json({ reachable: false });
   try {
-    await s.ensureAuthed();
-    const st = await s.stats();
-    res.json({ reachable: true, stats: st });
+    const st = await sink.stats();
+    res.json(st ? { reachable: true, stats: st } : { reachable: false });
   } catch (e) {
     res.json({ reachable: false, error: (e as Error).message });
   }
 });
 
-// --- Backlog OAuth connect flow: sign in, pick a project, install the webhook (OAuth only, no API keys)
-const backlogPending = new Map<string, { host: string; state: string }>(); // vesicle session → in-flight OAuth
-const backlogConn = new Map<string, { host: string; token: string; refresh: string; exp: number }>(); // → connected
+// --- Backlog OAuth connect flow: sign in, pick a project, install the webhook (OAuth only, no API
+// keys). The connection is a single server-level record persisted in the config store
+// (var/config.json), so it survives a restart and is not tied to who is signed in to Vesicle.
+let backlogPending: { host: string; state: string } | null = null; // in-flight OAuth (one at a time)
 
 function publicUrl(): string {
   const u = process.env.PUBLIC_URL;
@@ -231,16 +232,14 @@ function oauthApp(): { clientId: string; clientSecret: string; redirectUri: stri
   if (!clientId || !clientSecret) throw new Error("set BACKLOG_CLIENT_ID and BACKLOG_CLIENT_SECRET (from the Backlog OAuth app)");
   return { clientId, clientSecret, redirectUri: `${publicUrl()}/api/backlog/oauth/callback` };
 }
-function backlogConf(req: express.Request): { host: string; token: string } {
-  const t = cookieToken(req);
-  const c = t ? backlogConn.get(t) : undefined;
+function backlogConn() {
+  const c = loadConfig().sources.backlog;
   if (!c) throw new Error("not connected to Backlog — sign in first");
-  return { host: c.host, token: c.token };
+  return c;
 }
 
-app.get("/api/backlog/status", (req, res) => {
-  const t = cookieToken(req);
-  const c = t ? backlogConn.get(t) : undefined;
+app.get("/api/backlog/status", (_req, res) => {
+  const c = loadConfig().sources.backlog;
   res.json({ connected: !!c, host: c?.host ?? null });
 });
 
@@ -250,11 +249,9 @@ app.get("/api/backlog/oauth/start", (req, res) => {
     if (!/^[a-z0-9-]+\.(backlog\.(com|jp)|backlogtool\.com)$/.test(host)) {
       return res.status(400).json({ error: "host must be a Backlog space, e.g. example.backlog.com" });
     }
-    const t = cookieToken(req);
-    if (!t) return res.status(401).json({ error: "no session" });
     const oa = oauthApp();
     const state = randomBytes(16).toString("hex");
-    backlogPending.set(t, { host, state });
+    backlogPending = { host, state };
     res.redirect(authorizeUrl(host, oa.clientId, oa.redirectUri, state));
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
@@ -263,31 +260,33 @@ app.get("/api/backlog/oauth/start", (req, res) => {
 
 app.get("/api/backlog/oauth/callback", async (req, res) => {
   try {
-    const t = cookieToken(req);
-    const pending = t ? backlogPending.get(t) : undefined;
-    if (!t || !pending) return res.status(400).type("html").send("<p>OAuth session expired — start again from <a href='/connect'>/connect</a>.</p>");
+    const pending = backlogPending;
+    if (!pending) return res.status(400).type("html").send("<p>OAuth session expired — start again from <a href='/connect'>/connect</a>.</p>");
     if (String(req.query.state ?? "") !== pending.state) return res.status(400).send("state mismatch");
     const code = String(req.query.code ?? "");
     if (!code) return res.status(400).send("no authorization code");
     const oa = oauthApp();
     const tok = await exchangeCode(pending.host, { clientId: oa.clientId, clientSecret: oa.clientSecret, code, redirectUri: oa.redirectUri });
-    backlogConn.set(t, { host: pending.host, token: tok.access_token, refresh: tok.refresh_token, exp: Date.now() + tok.expires_in * 1000 });
-    backlogPending.delete(t);
+    saveConfig((c) => {
+      c.sources.backlog = { host: pending.host, accessToken: tok.access_token, refreshToken: tok.refresh_token, expiresAt: Date.now() + tok.expires_in * 1000 };
+    });
+    backlogPending = null;
     res.redirect("/connect?connected=1");
   } catch (e) {
     res.status(500).type("html").send(`<p>OAuth failed: ${(e as Error).message}</p>`);
   }
 });
 
-app.post("/api/backlog/disconnect", (req, res) => {
-  const t = cookieToken(req);
-  if (t) backlogConn.delete(t);
+app.post("/api/backlog/disconnect", (_req, res) => {
+  saveConfig((c) => {
+    delete c.sources.backlog;
+  });
   res.json({ ok: true });
 });
 
-app.get("/api/backlog/projects", async (req, res) => {
+app.get("/api/backlog/projects", async (_req, res) => {
   try {
-    const projects = await listProjects(backlogConf(req));
+    const projects = await backlogSource.listProjects(backlogConn());
     res.json({ projects: projects.map((p) => ({ id: p.id, projectKey: p.projectKey, name: p.name })) });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
@@ -296,14 +295,15 @@ app.get("/api/backlog/projects", async (req, res) => {
 
 app.post("/api/backlog/webhook", async (req, res) => {
   try {
+    const conn = backlogConn();
     const project = String(req.body?.project ?? "").trim();
     if (!project) return res.status(400).json({ error: "missing project" });
     const secret = process.env.BACKLOG_WEBHOOK_SECRET;
     const hookUrl = `${publicUrl()}/api/webhook/backlog${secret ? `?secret=${encodeURIComponent(secret)}` : ""}`;
-    const hook = await registerWebhook(
-      { project, hookUrl, name: "Vesicle stream", description: "issue events → StromaDB", activityTypeIds: ISSUE_ACTIVITY_TYPES },
-      backlogConf(req),
-    );
+    const hook = await backlogSource.installWebhook(conn, { project, hookUrl });
+    saveConfig((c) => {
+      if (c.sources.backlog) c.sources.backlog.projectKey = project;
+    });
     res.json({ ok: true, id: hook.id, hookUrl: hook.hookUrl, activityTypeIds: hook.activityTypeIds });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
@@ -312,32 +312,28 @@ app.post("/api/backlog/webhook", async (req, res) => {
 
 // Polling ingest (pull) — the tunnel-free path: the server periodically fetches recent Backlog
 // activities over OAuth (outbound only) and streams them into StromaDB. No public URL needed, unlike
-// the webhook (push). Same `backlogEventToBatch` mapping consumes both shapes.
-const backlogPollers = new Map<string, { project: string; timer: ReturnType<typeof setInterval>; lastId: number; ingested: number; busy: boolean; error: string | null }>();
+// the webhook (push). Same event→batch mapping consumes both shapes. Poll runtime state is a
+// module-level singleton keyed by source id — one poller per source, not per session.
+const pollers = new Map<string, { project: string; timer: ReturnType<typeof setInterval>; lastId: number; ingested: number; busy: boolean; error: string | null }>();
 const POLL_MS = Number(process.env.BACKLOG_POLL_MS ?? 15000);
 
-async function pollOnce(sessionTok: string): Promise<void> {
-  const st = backlogPollers.get(sessionTok);
-  const c = backlogConn.get(sessionTok);
+async function pollOnce(sourceId: string): Promise<void> {
+  const st = pollers.get(sourceId);
+  const c = loadConfig().sources.backlog;
   if (!st || !c || st.busy) return;
   st.busy = true;
   try {
-    const acts = await listActivities(
-      { host: c.host, token: c.token },
-      { project: st.project, minId: st.lastId || undefined, count: 100, order: "asc", activityTypeIds: ISSUE_ACTIVITY_TYPES },
-    );
-    if (acts.length) {
-      const db = new Stroma();
-      await db.ensureAuthed();
-      for (const a of acts) {
-        const batch = backlogEventToBatch(a as unknown as BacklogWebhook);
-        if (batch.ndjson) {
-          await db.ingest(batch.ndjson);
+    const { events } = await backlogSource.poll(c, st.project, st.lastId);
+    if (events.length) {
+      for (const e of events) {
+        const batch = backlogSource.eventToBatch(e);
+        if (batch.items.length) {
+          await sink.ingest(batch.items, { pipelineId: sourceId });
           st.ingested += batch.factCount;
         }
-        if (a.id > st.lastId) st.lastId = a.id;
+        if (e.id > st.lastId) st.lastId = e.id;
       }
-      console.log(`  backlog poll (${st.project}): ${acts.length} new activities → lastId ${st.lastId}, ${st.ingested} facts total`);
+      console.log(`  backlog poll (${st.project}): ${events.length} new activities → lastId ${st.lastId}, ${st.ingested} facts total`);
     }
     st.error = null;
   } catch (e) {
@@ -350,34 +346,34 @@ async function pollOnce(sessionTok: string): Promise<void> {
 
 app.post("/api/backlog/poll/start", (req, res) => {
   try {
-    const t = cookieToken(req);
-    const c = t ? backlogConn.get(t) : undefined;
-    if (!t || !c) return res.status(400).json({ error: "not connected to Backlog" });
+    const c = loadConfig().sources.backlog;
+    if (!c) return res.status(400).json({ error: "not connected to Backlog" });
     const project = String(req.body?.project ?? "").trim();
     if (!project) return res.status(400).json({ error: "missing project" });
-    const existing = backlogPollers.get(t);
+    const existing = pollers.get(backlogSource.id);
     if (existing) clearInterval(existing.timer);
-    backlogPollers.set(t, { project, timer: setInterval(() => void pollOnce(t), POLL_MS), lastId: 0, ingested: 0, busy: false, error: null });
-    void pollOnce(t); // kick off immediately
+    pollers.set(backlogSource.id, { project, timer: setInterval(() => void pollOnce(backlogSource.id), POLL_MS), lastId: 0, ingested: 0, busy: false, error: null });
+    saveConfig((cfg) => {
+      if (cfg.sources.backlog) cfg.sources.backlog.projectKey = project;
+    });
+    void pollOnce(backlogSource.id); // kick off immediately
     res.json({ ok: true, project, intervalMs: POLL_MS });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
   }
 });
 
-app.post("/api/backlog/poll/stop", (req, res) => {
-  const t = cookieToken(req);
-  const st = t ? backlogPollers.get(t) : undefined;
-  if (st && t) {
+app.post("/api/backlog/poll/stop", (_req, res) => {
+  const st = pollers.get(backlogSource.id);
+  if (st) {
     clearInterval(st.timer);
-    backlogPollers.delete(t);
+    pollers.delete(backlogSource.id);
   }
   res.json({ ok: true });
 });
 
-app.get("/api/backlog/poll/status", (req, res) => {
-  const t = cookieToken(req);
-  const st = t ? backlogPollers.get(t) : undefined;
+app.get("/api/backlog/poll/status", (_req, res) => {
+  const st = pollers.get(backlogSource.id);
   res.json({ running: !!st, project: st?.project ?? null, ingested: st?.ingested ?? 0, lastId: st?.lastId ?? 0, error: st?.error ?? null });
 });
 
@@ -481,13 +477,11 @@ app.post("/api/apply", async (req, res) => {
 
     const tr = transform(schema, mapping, data);
 
-    const db = new Stroma();
-    if (!(await db.health())) {
+    if (!(await sink.health())) {
       return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
     }
-    await db.ensureAuthed(); // API token if STROMA_API_TOKEN is set, else session login
-    await db.reset(); // each apply loads into a clean graph (opt-in; no-op if reset is disabled)
-    const stats = await db.ingest(tr.ndjson);
+    await sink.reset(); // each apply loads into a clean graph (admin op; no-op if reset is disabled)
+    const stats = await sink.ingest(tr.items, { pipelineId: "apply" });
 
     const out: Record<string, unknown> = { stats, gaps: tr.gaps };
 
@@ -504,6 +498,8 @@ app.post("/api/apply", async (req, res) => {
       return res.json(out);
     }
     const label = buildLabels(tr, data);
+    const db = new Stroma(); // payoff reads (expand) — read paths stay on the raw client
+    await db.ensureAuthed(); // API token if STROMA_API_TOKEN is set, else session login
     const needs = (await db.expand(targetGid, plan.needsPred)).map((g) => label[g] ?? `#${g}`);
     const ranking = await runPayoff(db, tr, plan, targetGid, (g) => label[g] ?? `#${g}`);
     out.payoff = { project: String(target?.name), needs, ranking };
