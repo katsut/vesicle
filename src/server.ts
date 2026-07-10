@@ -216,6 +216,21 @@ app.get("/api/stroma-stats", async (_req, res) => {
   }
 });
 
+// Admin: wipe the engine database. Deliberately NOT part of any ingest path — every pipeline loads
+// incrementally; this is the one explicit destructive action (the sink settings surface calls it).
+// Requires { confirm: true } so a stray call can't clear the graph. No-op if the engine runs without
+// --allow-reset.
+app.post("/api/sink/reset", async (req, res) => {
+  if (req.body?.confirm !== true) return res.status(400).json({ error: "pass { confirm: true } to reset the sink" });
+  try {
+    await sink.reset();
+    console.log("  /api/sink/reset → engine database cleared");
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
 // --- Backlog OAuth connect flow: sign in, pick a project, install the webhook (OAuth only, no API
 // keys). The connection is a single server-level record persisted in the config store
 // (var/config.json), so it survives a restart and is not tied to who is signed in to Vesicle.
@@ -480,7 +495,9 @@ app.post("/api/apply", async (req, res) => {
     if (!(await sink.health())) {
       return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
     }
-    await sink.reset(); // each apply loads into a clean graph (admin op; no-op if reset is disabled)
+    // Incremental load: apply never wipes the graph (other pipelines feed the same one). Node ids are
+    // deterministic per source, so re-applying the same data converges instead of duplicating. A full
+    // wipe is the explicit admin action POST /api/sink/reset.
     const stats = await sink.ingest(tr.items, { pipelineId: "apply" });
 
     const out: Record<string, unknown> = { stats, gaps: tr.gaps };
