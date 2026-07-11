@@ -55,7 +55,10 @@ export interface BacklogBatch {
 }
 
 // Node-id namespaces: Backlog ids are per-entity, so offset by type to keep them globally unique.
-const BASE = { Person: 1_000_000_000, Project: 2_000_000_000, Issue: 3_000_000_000, Comment: 4_000_000_000 } as const;
+// The stride is 1e12: real Backlog global ids run past 1e9, so a 1e9 stride overflowed entities into
+// the next type's band (and could collide two entities on one node id). 4e12 stays far inside both
+// JS's 2^53 integers and the engine's u64.
+const BASE = { Person: 1_000_000_000_000, Project: 2_000_000_000_000, Issue: 3_000_000_000_000, Comment: 4_000_000_000_000 } as const;
 const nid = (kind: keyof typeof BASE, id: number): number => BASE[kind] + id;
 
 // Schema is emitted with every batch. Re-sending a type_def / a same-cardinality pred_def is idempotent
@@ -103,8 +106,17 @@ const CLOSABLE_FIELDS: Record<string, string> = {
 
 const isEmptyValue = (v: string | null | undefined): boolean => v == null || String(v).trim() === "";
 
+/** Lookups for real activity payloads. Webhook fixtures carry snapshot objects (`content.status`,
+ *  `content.assignee`); real polled activities carry only field diffs — `changes[]` with the status
+ *  as a numeric-id string and the assignee as a display name. These resolve them back to values the
+ *  mapping can emit (status id → name; user name → the user, so a Person node id can be minted). */
+export interface BacklogLookups {
+  statusName(id: string): string | undefined;
+  userByName(name: string): BacklogUser | undefined;
+}
+
 /** Map one Backlog activity to a self-contained ingest batch. Unknown types return `{items:[], kind:"ignored"}`. */
-export function backlogEventToBatch(ev: BacklogWebhook): BacklogBatch {
+export function backlogEventToBatch(ev: BacklogWebhook, lookups?: BacklogLookups): BacklogBatch {
   const at = isoToEpoch(ev.created);
   const nodes: BatchItem[] = [];
   const facts: BatchItem[] = [];
@@ -164,18 +176,46 @@ export function backlogEventToBatch(ev: BacklogWebhook): BacklogBatch {
     }
     case 2: {
       const issue = emitIssue();
-      // Cessation: a cleared field (old value present → new value empty) ends its one-cardinality
-      // value with no successor. The engine cannot infer that — the snapshot just omits the field —
-      // so emit a close at the event time; as-of reads before it still see the prior value.
+      // The update's substance is in changes[] — real polled activities carry ONLY these diffs (no
+      // snapshot objects), so this loop is what turns a real update into facts.
       const closed: string[] = [];
+      const changed: string[] = [];
       for (const ch of ev.content.changes ?? []) {
         const predicate = CLOSABLE_FIELDS[ch.field];
-        if (!predicate || isEmptyValue(ch.old_value) || !isEmptyValue(ch.new_value)) continue;
-        closes.push({ close: { subject: issue, predicate, valid_from: at } });
-        closed.push(predicate);
+        if (!predicate) continue;
+        // Cessation: a cleared field (old value present → new value empty) ends its one-cardinality
+        // value with no successor. The engine cannot infer that — the payload just omits the field —
+        // so emit a close at the event time; as-of reads before it still see the prior value.
+        if (!isEmptyValue(ch.old_value) && isEmptyValue(ch.new_value)) {
+          closes.push({ close: { subject: issue, predicate, valid_from: at } });
+          closed.push(predicate);
+          continue;
+        }
+        if (isEmptyValue(ch.new_value)) continue;
+        const v = String(ch.new_value);
+        // Value-carrying diff — only when the snapshot didn't already emit this predicate, so the
+        // webhook path (which carries both) doesn't double-write.
+        if (predicate === "status" && !ev.content.status) {
+          const name = lookups?.statusName(v) ?? v; // unresolved id string still beats dropping the change
+          fact(issue, "status", { text: name });
+          changed.push(`status → ${name}`);
+        } else if (predicate === "assigned-to" && !ev.content.assignee) {
+          // the diff carries a display name; only a resolved user can mint the Person node id
+          const u = lookups?.userByName(v);
+          if (u) {
+            fact(issue, "assigned-to", { node: person(u) });
+            changed.push(`assigned-to → ${u.name}`);
+          }
+        } else if (predicate === "summary" && ev.content.summary == null) {
+          fact(issue, "summary", { text: v });
+          changed.push("summary");
+        }
       }
       kind = "issue-updated";
-      summary = `issue ${keyLabel} updated${ev.content.status ? ` → ${ev.content.status.name}` : ""}${closed.length ? ` (closed ${closed.join(", ")})` : ""}`;
+      const statusNote = ev.content.status ? ` → ${ev.content.status.name}` : "";
+      const diffNote = changed.length ? ` (${changed.join(", ")})` : "";
+      const closeNote = closed.length ? ` (closed ${closed.join(", ")})` : "";
+      summary = `issue ${keyLabel} updated${statusNote}${diffNote}${closeNote}`;
       break;
     }
     case 3: {

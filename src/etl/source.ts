@@ -4,11 +4,13 @@
 // adapter over the existing backlog.ts / backlog-api.ts functions (the OAuth dance itself stays in
 // the server routes — the Source contract is about ingestion).
 
-import { backlogEventToBatch, type BacklogWebhook } from "../backlog.ts";
+import { backlogEventToBatch, type BacklogLookups, type BacklogUser, type BacklogWebhook } from "../backlog.ts";
 import {
   ISSUE_ACTIVITY_TYPES,
   listActivities,
   listProjects,
+  listProjectUsers,
+  listStatuses,
   registerWebhook,
   type BacklogProject,
   type BacklogWebhookRecord,
@@ -59,6 +61,30 @@ export class BacklogSource implements Source {
   readonly label = "Backlog";
   readonly modes: IngestMode[] = ["webhook", "poll"];
 
+  // Per-project lookups for real activity payloads, whose changes[] carry status ids and user display
+  // names instead of snapshot objects. Fetched once per scope and cached; a refresh only happens when
+  // the scope changes (statuses/members are near-static — a stale hit degrades to the raw value).
+  private lookupScope: string | null = null;
+  private statusById = new Map<string, string>();
+  private userByName = new Map<string, BacklogUser>();
+
+  /** Load the scope's status list + member list into the lookup cache (no-op when already loaded). */
+  async ensureLookups(conn: SourceConnection, scope: string): Promise<void> {
+    if (this.lookupScope === scope && this.statusById.size) return;
+    const auth = { host: conn.host, token: conn.accessToken };
+    const [statuses, users] = await Promise.all([listStatuses(scope, auth), listProjectUsers(scope, auth)]);
+    this.statusById = new Map(statuses.map((s) => [String(s.id), s.name]));
+    this.userByName = new Map(users.map((u) => [u.name, { id: u.id, name: u.name, mailAddress: u.mailAddress }]));
+    this.lookupScope = scope;
+  }
+
+  private lookups(): BacklogLookups {
+    return {
+      statusName: (id) => this.statusById.get(id),
+      userByName: (name) => this.userByName.get(name),
+    };
+  }
+
   webhookToEvents(payload: unknown): SourceEvent[] | null {
     const ev = payload as BacklogWebhook | undefined;
     if (!ev || typeof ev.type !== "number" || !ev.content || !ev.project) return null;
@@ -67,6 +93,12 @@ export class BacklogSource implements Source {
 
   /** `scope` is the Backlog project id or key. */
   async poll(conn: SourceConnection, scope: string, cursor: number): Promise<{ events: SourceEvent[]; nextCursor: number }> {
+    try {
+      await this.ensureLookups(conn, scope);
+    } catch (e) {
+      // polling continues without lookups — status diffs then land as raw id strings
+      console.log(`  backlog lookups unavailable (${scope}): ${(e as Error).message}`);
+    }
     const acts = await listActivities(
       { host: conn.host, token: conn.accessToken },
       { project: scope, minId: cursor || undefined, count: 100, order: "asc", activityTypeIds: ISSUE_ACTIVITY_TYPES },
@@ -79,7 +111,7 @@ export class BacklogSource implements Source {
 
   /** A polled activity has the same shape as a webhook payload, so one mapping consumes both. */
   eventToBatch(event: SourceEvent): SourceBatch {
-    return backlogEventToBatch(event.payload as BacklogWebhook);
+    return backlogEventToBatch(event.payload as BacklogWebhook, this.lookups());
   }
 
   // --- connector management (Backlog-specific, beyond the ingest contract): the connect page's
