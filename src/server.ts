@@ -292,7 +292,7 @@ app.get("/api/backlog/oauth/start", (req, res) => {
 app.get("/api/backlog/oauth/callback", async (req, res) => {
   try {
     const pending = backlogPending;
-    if (!pending) return res.status(400).type("html").send("<p>OAuth session expired — start again from <a href='/connect'>/connect</a>.</p>");
+    if (!pending) return res.status(400).type("html").send("<p>OAuth session expired — start again from <a href='/sources.html'>Sources</a>.</p>");
     if (String(req.query.state ?? "") !== pending.state) return res.status(400).send("state mismatch");
     const code = String(req.query.code ?? "");
     if (!code) return res.status(400).send("no authorization code");
@@ -302,7 +302,7 @@ app.get("/api/backlog/oauth/callback", async (req, res) => {
       c.sources.backlog = { host: pending.host, accessToken: tok.access_token, refreshToken: tok.refresh_token, expiresAt: Date.now() + tok.expires_in * 1000 };
     });
     backlogPending = null;
-    res.redirect("/connect?connected=1");
+    res.redirect("/sources.html?connected=1"); // Sources shows the success banner; /connect stays reachable directly
   } catch (e) {
     res.status(500).type("html").send(`<p>OAuth failed: ${(e as Error).message}</p>`);
   }
