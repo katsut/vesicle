@@ -113,11 +113,12 @@
   footer b{color:var(--fg);font-weight:600}
   @media (max-width:920px){.board{grid-template-columns:1fr;gap:14px}.mini{display:none}canvas#wire{display:none}}
   @media (prefers-reduced-motion:reduce){.live .d{animation:none}}
-  /* connection state: only connected sources light up; unconnected are dimmed candidates */
-  .node.src{cursor:pointer;transition:opacity .25s,filter .25s,border-color .15s}
+  /* connection state: real connectors light up from server state; the rest are planned (dimmed) */
+  .node.src{transition:opacity .25s,filter .25s,border-color .15s}
   .node.src[data-conn="0"]{opacity:.42;filter:grayscale(.55)}
-  .node.src[data-conn="0"]:hover{opacity:.72}
-  .node.src[data-conn="1"]:hover{border-color:color-mix(in oklab,var(--earth) 46%,var(--line))}
+  .node.src.real{cursor:pointer}
+  .node.src.real[data-conn="0"]:hover{opacity:.72}
+  .node.src.real[data-conn="1"]:hover{border-color:color-mix(in oklab,var(--earth) 46%,var(--line))}
   .node.src .st{margin-left:auto;flex:none;font:700 8.5px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:3px 6px;border-radius:100px}
   .node.src[data-conn="1"] .st{color:var(--earth);background:color-mix(in oklab,var(--earth) 15%,transparent);border:1px solid color-mix(in oklab,var(--earth) 34%,transparent)}
   .node.src[data-conn="0"] .st{color:var(--mut);background:var(--panel-2);border:1px solid var(--line)}
@@ -135,7 +136,8 @@
     resolve into a <b>shared ontology</b> (Types + predicates), and stream into <b>StromaDB</b>, kept live by
     incremental maintenance. Particles are data in flight. The LLM runs only at authoring time — the streaming
     hot path is token-zero.</p>
-  <p class="connhint"><b>Click a source to connect or disconnect it.</b> Only connected sources light up;
+  <p class="connhint"><b>Sources light up from the real connector state</b> — connect them on the
+    <a href="/sources.html" target="_top">Sources</a> screen. Dimmed sources are planned connectors;
     particles flow only while data is actually arriving.</p>
 
   <div class="board" id="board">
@@ -238,17 +240,24 @@ const SRC_EDGES = [
 ];
 const INT_EDGES = [ ['on-elt','facts','data'], ['on-llm','facts','llm'], ['facts','onto','data'], ['onto','stroma','data'] ];
 const ELT_SRC = ['src-postgres','src-snowflake','src-sheet','src-jira','src-backlog','src-calendar'];
-const DEFAULT_CONN = ['src-postgres','src-jira','src-gdocs'];
-
-// Which sources are wired up — operator-controlled, persisted. Only connected sources get a live pipe.
-let connected;
-try { const s = JSON.parse(localStorage.getItem('vesicle-connections')); connected = new Set(Array.isArray(s) ? s : DEFAULT_CONN); }
-catch { connected = new Set(DEFAULT_CONN); }
-function saveConn(){ try { localStorage.setItem('vesicle-connections', JSON.stringify([...connected])); } catch {} }
+// Connection state is the SERVER's, not a visual toggle: real connectors (Backlog today) light up
+// from /api/backlog/status; every other source is a planned connector, rendered dimmed and inert.
+// The engine-side lanes (facts → ontology → StromaDB) are always drawn, so real write surges (e.g. a
+// one-shot apply) still visualize even with no streaming source connected.
+const REAL_SOURCES = new Set(['src-backlog']);
+const connected = new Set();
+async function refreshConn(){
+  let on = false;
+  try { on = (await fetch('/api/backlog/status').then(r=>r.json())).connected === true; }
+  catch { /* unreachable app server → show as not connected until the next poll */ }
+  const changed = on !== connected.has('src-backlog');
+  if (on) connected.add('src-backlog'); else connected.delete('src-backlog');
+  if (changed) { renderConn(); anchors(); }
+}
 function liveEdges(){
+  const out = SRC_EDGES.filter(([f])=>connected.has(f)).slice();
   const anyELT = ELT_SRC.some(id=>connected.has(id));
   const anyLLM = connected.has('src-confluence') || connected.has('src-gdocs');
-  const out = SRC_EDGES.filter(([f])=>connected.has(f)).slice();
   for(const e of INT_EDGES){
     if(e[0]==='on-elt' && !anyELT) continue;
     if(e[0]==='on-llm' && !anyLLM) continue;
@@ -258,19 +267,27 @@ function liveEdges(){
 }
 function renderConn(){
   document.querySelectorAll('.node.src').forEach(node=>{
+    const real = REAL_SOURCES.has(node.id);
     const on = connected.has(node.id);
+    node.classList.toggle('real', real);
     node.dataset.conn = on ? '1' : '0';
-    node.setAttribute('role','button');
-    node.setAttribute('aria-pressed', on ? 'true' : 'false');
     let chip = node.querySelector('.st');
     if(!chip){ chip=document.createElement('span'); chip.className='st'; node.querySelector('.t').appendChild(chip); }
-    chip.textContent = on ? 'connected' : 'connect';
+    if (real) {
+      node.setAttribute('role','link');
+      node.title = on ? 'connected — manage on Sources' : 'not connected — connect on Sources';
+      chip.textContent = on ? 'connected' : 'connect';
+    } else {
+      node.removeAttribute('role');
+      node.title = 'planned connector';
+      chip.textContent = 'planned';
+    }
   });
   const c=document.getElementById('srcCount'); if(c) c.textContent = `Sources · ${connected.size} connected`;
 }
+// A real source navigates to the Sources screen (top window — this view is often embedded).
 function toggle(node){
-  if(connected.has(node.id)) connected.delete(node.id); else connected.add(node.id);
-  saveConn(); renderConn(); anchors();
+  if (REAL_SOURCES.has(node.id)) (window.top||window).location.href = '/sources.html';
 }
 let edges=[], stromaGlow=0, W=0,H=0,dpr=1;
 let C = {};
@@ -369,6 +386,7 @@ function init(){
   renderConn();
   document.querySelectorAll('.node.src').forEach(n=>n.addEventListener('click', ()=>toggle(n)));
   resize(); requestAnimationFrame(frame); requestAnimationFrame(graphFrame); poll(); setInterval(poll, 1500);
+  refreshConn(); setInterval(refreshConn, 10000); // real connector state, server-driven
 }
 setTimeout(init, 60);
 </script>
