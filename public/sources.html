@@ -108,6 +108,17 @@
   .loading{color:var(--mut);font-size:13px;padding:8px 0}
   .note{margin-top:18px;padding:11px 13px;background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);font-size:12.5px;color:var(--fg-dim);line-height:1.5;box-shadow:var(--bevel),var(--shadow)}
   .note a{color:var(--accent-2);font-weight:600}
+  /* Drive body-lane funnel (checklist inside the card) */
+  .fsec{margin-top:14px;border-top:1px solid var(--line);padding-top:11px}
+  .flist{display:flex;flex-direction:column;gap:2px;max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-sm);padding:6px 8px;background:var(--panel-2)}
+  .fitem{display:flex;align-items:center;gap:7px;margin:0;padding:3px 0;cursor:pointer;font:500 12.5px/1.4 var(--sans);color:var(--fg);text-transform:none;letter-spacing:0}
+  .fitem input{width:auto;flex:none;margin:0;accent-color:var(--accent)}
+  .fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ftag{flex:none;font:600 9.5px/1 var(--mono);letter-spacing:.04em;border:1px solid var(--line-2);border-radius:100px;padding:3px 6px;color:var(--mut);background:var(--panel)}
+  .ftag.draft{color:var(--clay);border-color:color-mix(in oklab,var(--clay) 40%,transparent);background:var(--clay-soft)}
+  .ftag.lbl{color:var(--sky);border-color:color-mix(in oklab,var(--sky) 34%,transparent);background:var(--sky-soft)}
+  .fres{font:12px/1.6 var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fres.ok{color:var(--good)} .fres.bad{color:var(--bad)}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}.pollstat .dot{animation:none}}
 </style>
 </head>
@@ -199,6 +210,16 @@ const I18N = {
     gd_streaming_line: "streaming {scope} · {n} facts ingested",
     gd_phase_listing: "initial listing…",
     gd_msg_started: "Streaming {scope} — full listing first, then Drive changes over OAuth (no public URL needed).",
+    gd_docs_head: "Read documents",
+    gd_docs_hint: "One-shot: the LLM reads each selected document once and its claims land in the graph with per-file provenance. PDF & Google Docs only — never triggered by the poll.",
+    gd_load_docs: "Load documents",
+    gd_no_readable: "No readable documents (PDF / Google Docs) in this scope.",
+    gd_skipped: "{n} files skipped: {kinds}",
+    gd_truncated: "Large scope — showing the first 200 files.",
+    gd_draft: "draft",
+    gd_read_selected: "Read selected ({m})",
+    gd_read_busy: "Reading {m} documents — one LLM call each…",
+    gd_read_done: "Read {ok}/{n} documents · {facts} claims ingested",
   },
   ja: {
     nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル",
@@ -233,6 +254,16 @@ const I18N = {
     gd_streaming_line: "{scope} をストリーミング中 · {n} facts 取り込み済み",
     gd_phase_listing: "初回リスティング中…",
     gd_msg_started: "{scope} のストリーミングを開始 — まず全件リスティング、その後は OAuth 経由で Drive の変更を取得します（公開 URL 不要）。",
+    gd_docs_head: "ドキュメント読み取り",
+    gd_docs_hint: "ワンショット実行：選択したドキュメントを LLM が 1 回ずつ読み取り、抽出クレームをファイル単位の provenance 付きでグラフへ取り込みます。対象は PDF と Google ドキュメントのみ — ポーリングでは実行されません。",
+    gd_load_docs: "ドキュメント一覧を取得",
+    gd_no_readable: "このスコープに読み取り可能なドキュメント（PDF / Google ドキュメント）はありません。",
+    gd_skipped: "{n} 件をスキップ: {kinds}",
+    gd_truncated: "スコープが大きいため先頭 200 件のみ表示しています。",
+    gd_draft: "下書き?",
+    gd_read_selected: "選択した {m} 件を読み取る",
+    gd_read_busy: "{m} 件を読み取り中 — 1 件につき LLM 1 コール…",
+    gd_read_done: "{n} 件中 {ok} 件を読み取り · {facts} クレームを取り込み",
   },
   zh: {
     nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型",
@@ -267,6 +298,16 @@ const I18N = {
     gd_streaming_line: "正在流式 {scope} · 已摄取 {n} 条事实",
     gd_phase_listing: "首次列举中…",
     gd_msg_started: "已开始流式 {scope} — 先全量列举，随后通过 OAuth 拉取 Drive 变更（无需公开 URL）。",
+    gd_docs_head: "读取文档",
+    gd_docs_hint: "一次性执行：LLM 将逐一读取所选文档，抽取的声明携带按文件的来源标记进入图谱。仅支持 PDF 与 Google 文档 — 不会随轮询触发。",
+    gd_load_docs: "加载文档列表",
+    gd_no_readable: "该范围内没有可读取的文档（PDF / Google 文档）。",
+    gd_skipped: "跳过 {n} 个文件：{kinds}",
+    gd_truncated: "范围较大 — 仅显示前 200 个文件。",
+    gd_draft: "草稿",
+    gd_read_selected: "读取所选（{m}）",
+    gd_read_busy: "正在读取 {m} 个文档 — 每个文档一次 LLM 调用…",
+    gd_read_done: "已读取 {ok}/{n} 个文档 · 摄取 {facts} 条声明",
   },
 };
 let LANG = "en";
@@ -449,7 +490,9 @@ async function refresh() {
 }
 
 // --- Google Drive card state machine: loading → error | disconnected | connected (mirrors Backlog) ---
-const GD = { state: "loading", scopes: null, scopesError: null, poll: null, msg: null, error: null };
+// funnel/sel/extract carry the body-lane curation state across re-renders (language/theme/poll ticks).
+const GD = { state: "loading", scopes: null, scopesError: null, poll: null, msg: null, error: null,
+             funnel: null, sel: new Set(), extract: null };
 let gdPollTimer = null;
 
 function setGdStatusChip() {
@@ -517,7 +560,12 @@ function renderGdrive() {
       <button class="btn ghost" id="gdStop" ${running ? "" : "hidden"}>${t("stop_poll")}</button>
     </div>
     <div class="pollstat" id="gdPollstat" ${running ? "" : "hidden"}></div>
-    <div id="gdMsg"></div>`;
+    <div id="gdMsg"></div>
+    <div class="fsec">
+      <label>${t("gd_docs_head")}</label>
+      <p class="hint" style="margin:0 0 9px">${t("gd_docs_hint")}</p>
+      <div id="gdFunnelBody"></div>
+    </div>`;
   if (GD.scopesError) gdShow("err", GD.scopesError);
   const syncFolder = () => { $("#gdFolderWrap").hidden = $("#gdScope").value !== "folder"; };
   $("#gdScope").onchange = syncFolder;
@@ -554,8 +602,131 @@ function renderGdrive() {
     try { await jf("/api/gdrive/poll/stop", { method: "POST" }); GD.msg = { kind: "ok", text: t("msg_stopped") }; await gdPollStatus(); }
     catch (e) { gdShow("err", e.message); }
   };
+  renderFunnel();
 }
 function gdShow(kind, text) { const m = $("#gdMsg"); if (m) { m.className = "msg " + kind; m.textContent = text; } }
+
+// --- Drive body-lane funnel: curate → read (one-shot extraction; drafts pre-deselected) ---
+function gdCurrentScope() {
+  const sel = $("#gdScope");
+  if (!sel) return null;
+  if (sel.value === "my-drive") return "my-drive";
+  if (sel.value === "folder") { const raw = $("#gdFolder").value.trim(); return raw ? "folder:" + raw : null; }
+  return sel.value; // "drive:<id>"
+}
+
+// mimeType → a short display kind for the skipped summary ("images 3, sheets 2, …")
+function mimeKind(m) {
+  if (m.startsWith("image/")) return "images";
+  if (m.startsWith("video/")) return "video";
+  if (m.startsWith("audio/")) return "audio";
+  const map = {
+    "application/vnd.google-apps.spreadsheet": "sheets",
+    "application/vnd.google-apps.presentation": "slides",
+    "application/vnd.google-apps.folder": "folders",
+    "application/vnd.google-apps.form": "forms",
+    "application/vnd.google-apps.shortcut": "shortcuts",
+    "text/plain": "text",
+  };
+  return map[m] || m.split("/").pop();
+}
+function skippedSummary(skipped) {
+  const byKind = {};
+  for (const [m, n] of Object.entries(skipped)) { const k = mimeKind(m); byKind[k] = (byKind[k] || 0) + n; }
+  return Object.entries(byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(", ");
+}
+
+function extractResultsHtml() {
+  const R = GD.extract.results;
+  const rows = R.map((r) => r.ok
+    ? `<div class="fres ok">✓ ${esc(r.name)} · ${r.facts}</div>`
+    : `<div class="fres bad">✗ ${esc(r.name)} · ${esc(r.error || "failed")}</div>`).join("");
+  const okN = R.filter((r) => r.ok).length;
+  const facts = R.reduce((a, r) => a + (r.facts || 0), 0);
+  return `<div class="msg ${okN === R.length ? "ok" : "err"}" style="margin-top:10px">${esc(t("gd_read_done", { ok: okN, n: R.length, facts }))}</div>
+    <div style="margin-top:6px">${rows}</div>`;
+}
+
+function renderFunnel() {
+  const root = $("#gdFunnelBody");
+  if (!root) return;
+  const F = GD.funnel;
+  const busy = !!(GD.extract && GD.extract.running);
+  let html = "";
+  if (!F) {
+    html = `<div class="actions" style="margin-top:0"><button class="btn ghost" id="gdLoadDocs">${t("gd_load_docs")}</button></div>`;
+  } else if (F.state === "loading") {
+    html = `<div class="loading">${t("loading")}</div>`;
+  } else if (F.state === "error") {
+    html = `<div class="msg err" style="margin-top:0">${esc(F.error)}</div>
+      <div class="actions"><button class="btn ghost" id="gdLoadDocs">${t("gd_load_docs")}</button></div>`;
+  } else {
+    const skippedTotal = Object.values(F.skipped).reduce((a, b) => a + b, 0);
+    const items = F.files.map((f) => `
+      <label class="fitem">
+        <input type="checkbox" data-fid="${esc(f.id)}" ${GD.sel.has(f.id) ? "checked" : ""} ${busy ? "disabled" : ""}>
+        <span class="ftag">${f.mimeType === "application/pdf" ? "PDF" : "Doc"}</span>
+        <span class="fname" title="${esc(f.name)}">${esc(f.name)}</span>
+        ${f.draft ? `<span class="ftag draft">${t("gd_draft")}</span>` : ""}
+        <span class="ftag lbl">L${f.label}</span>
+      </label>`).join("");
+    html = `
+      ${F.truncated ? `<div class="hint" style="margin:0 0 6px">${t("gd_truncated")}</div>` : ""}
+      ${F.files.length ? `<div class="flist">${items}</div>` : `<div class="hint" style="margin:0">${t("gd_no_readable")}</div>`}
+      ${skippedTotal ? `<div class="hint" style="margin:6px 0 0">${esc(t("gd_skipped", { n: skippedTotal, kinds: skippedSummary(F.skipped) }))}</div>` : ""}
+      <div class="actions">
+        <button class="btn" id="gdRead" ${GD.sel.size && !busy ? "" : "disabled"}>${t("gd_read_selected", { m: GD.sel.size })}</button>
+        <button class="btn ghost" id="gdLoadDocs" ${busy ? "disabled" : ""}>↻ ${t("gd_load_docs")}</button>
+      </div>
+      ${busy ? `<div class="pollstat"><span class="dot"></span> ${esc(t("gd_read_busy", { m: GD.extract.count }))}</div>` : ""}
+      ${GD.extract && GD.extract.error ? `<div class="msg err" style="margin-top:10px">${esc(GD.extract.error)}</div>` : ""}
+      ${GD.extract && GD.extract.results ? extractResultsHtml() : ""}`;
+  }
+  root.innerHTML = html;
+  const load = $("#gdLoadDocs"); if (load) load.onclick = loadFunnel;
+  const read = $("#gdRead"); if (read) read.onclick = readSelected;
+  root.querySelectorAll("input[data-fid]").forEach((cb) => {
+    cb.onchange = () => {
+      const id = cb.getAttribute("data-fid");
+      if (cb.checked) GD.sel.add(id); else GD.sel.delete(id);
+      const btn = $("#gdRead");
+      if (btn) { btn.disabled = !GD.sel.size; btn.textContent = t("gd_read_selected", { m: GD.sel.size }); }
+    };
+  });
+}
+
+async function loadFunnel() {
+  const scope = gdCurrentScope();
+  if (!scope) { GD.funnel = { state: "error", error: t("gd_folder_invalid") }; renderFunnel(); return; }
+  GD.funnel = { state: "loading" };
+  GD.extract = null;
+  renderFunnel();
+  try {
+    const r = await jf("/api/gdrive/funnel?scope=" + encodeURIComponent(scope));
+    GD.funnel = { state: "loaded", scope, files: r.files, skipped: r.skipped, total: r.total, truncated: r.truncated };
+    GD.sel = new Set(r.files.filter((f) => !f.draft).map((f) => f.id)); // drafts listed but pre-deselected
+  } catch (e) {
+    GD.funnel = { state: "error", error: e.message };
+  }
+  renderFunnel();
+}
+
+async function readSelected() {
+  const ids = [...GD.sel];
+  if (!ids.length || (GD.extract && GD.extract.running)) return;
+  GD.extract = { running: true, count: ids.length, results: null, error: null };
+  renderFunnel();
+  try {
+    const r = await jf("/api/gdrive/extract", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ scope: GD.funnel.scope, fileIds: ids }),
+    });
+    GD.extract = { running: false, count: ids.length, results: r.results, error: null };
+  } catch (e) {
+    GD.extract = { running: false, count: ids.length, results: null, error: e.message };
+  }
+  renderFunnel();
+}
 
 async function gdPollStatus() {
   try {

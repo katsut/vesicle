@@ -5,8 +5,9 @@
 import type { Cardinality } from "../types.ts";
 import type { Rule } from "../conformance.ts";
 
-/** A fact/retract object: a node reference or a text value. */
-export type FactObject = { node: number } | { text: string };
+/** A fact/retract object: a node reference or a scalar value (the engine's wire accepts
+ *  node|int|float|text|bool; only the kinds a connector emits are modeled here). */
+export type FactObject = { node: number } | { text: string } | { int: number };
 
 export interface TypeDef {
   name: string;

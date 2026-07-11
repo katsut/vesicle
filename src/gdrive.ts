@@ -18,8 +18,9 @@ import { FOLDER_MIME, SHORTCUT_MIME, type DriveFile, type DrivePermission, type 
 // Drive ids are opaque strings, so stable numeric node ids come from a deterministic 48-bit hash
 // (FNV-1a 64 truncated to 2^48) of the Drive id, placed in per-type bands ABOVE the Backlog ones
 // (Person 1e12 … Comment 4e12). A 48-bit hash needs a 2^48-wide band — a 1e12 stride cannot hold it —
-// so the Drive bands sit at multiples of 2^48: Document 5·2^48, Folder 6·2^48, Person 7·2^48. The
-// highest id (8·2^48 = 2^51) stays far inside JS's 2^53 integers and the engine's u64.
+// so the Drive bands sit at multiples of 2^48: Document 5·2^48, Folder 6·2^48, Person 7·2^48, plus
+// the extracted-entity band 8·2^48 minted by the body lane (see gdrive-extract.ts CLAIM_BAND). The
+// highest id (9·2^48 < 2^52) stays far inside JS's 2^53 integers and the engine's u64.
 //
 // Collision expectation: 2^48 values per band → the birthday bound is ~2^24 ≈ 16.7M ids per type
 // before a collision becomes likely, several orders of magnitude beyond any real drive scope.
@@ -35,8 +36,9 @@ const FNV_PRIME = 0x100000001b3n;
 const U64 = 0xffffffffffffffffn;
 const MASK48 = (1n << 48n) - 1n;
 
-/** FNV-1a 64 over the UTF-16 code units, truncated to 48 bits. */
-function hash48(s: string): number {
+/** FNV-1a 64 over the UTF-16 code units, truncated to 48 bits. Shared with the body lane's
+ *  extracted-entity ids (gdrive-extract.ts), so every Drive-derived id hashes the same way. */
+export function hash48(s: string): number {
   let h = FNV_OFFSET;
   for (let i = 0; i < s.length; i++) {
     h ^= BigInt(s.charCodeAt(i));
