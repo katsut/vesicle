@@ -6,6 +6,10 @@
 <title>Vesicle — connect Backlog</title>
 <script defer src="/nav.js"></script>
 <style>
+  /* Same-origin cross-document view transitions: switching screens crossfades instead of
+     repainting. Progressive enhancement; motion respects the reduced-motion preference. */
+  @view-transition{navigation:auto}
+  @media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
   :root{
     --bg:#f2efe6; --panel:#fffdf7; --panel-2:#f6f1e7; --line:#e5dfd1; --line-2:#d4ccba;
     --fg:#211d15; --dim:#574f40; --mut:#8b8371; --earth:#2f9e73; --earth-2:#237a58; --clay:#b06a2a;

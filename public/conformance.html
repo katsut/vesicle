@@ -6,6 +6,10 @@
 <title>Conformance review — Vesicle</title>
 <script defer src="/nav.js"></script>
 <style>
+  /* Same-origin cross-document view transitions: switching screens crossfades instead of
+     repainting. Progressive enhancement; motion respects the reduced-motion preference. */
+  @view-transition{navigation:auto}
+  @media (prefers-reduced-motion:reduce){::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
   :root {
     --bg:#0b0f17; --panel:#131a28; --line:#1e2838; --fg:#e9edf4; --muted:#8492a8; --dim:#5b677c;
     --mint:#37d6a8; --amber:#e9b24c; --rose:#e8686e; --violet:#8e7be8;
