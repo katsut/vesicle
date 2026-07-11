@@ -13,6 +13,7 @@
 import type { DerivedRelation, Mapping, Predicate } from "./types.ts";
 import type { PredDef, TypeDef } from "./etl/types.ts";
 import { SCHEMA as BACKLOG_SCHEMA } from "./backlog.ts";
+import { SCHEMA as GDRIVE_SCHEMA } from "./gdrive.ts";
 
 /** The shared type layer — ONE per deployment; every source maps onto it. */
 export interface SharedModel {
@@ -47,13 +48,22 @@ export interface ModelAdditions {
   predicates: string[];
 }
 
-/** The seed shared layer: the Backlog source's static declarations (its type_def/pred_def items). */
+/** The seed shared layer: the built-in sources' static declarations (their type_def/pred_def items).
+ *  Deduped by name — Backlog and Drive both declare the shared Person (and its name/email), and the
+ *  duplicate declarations are identical by construction. */
 export function seedModel(): SharedModel {
   const types: TypeDef[] = [];
   const predicates: PredDef[] = [];
-  for (const item of BACKLOG_SCHEMA) {
-    if ("type_def" in item) types.push({ ...item.type_def });
-    else if ("pred_def" in item) predicates.push({ ...item.pred_def });
+  const seenTypes = new Set<string>();
+  const seenPreds = new Set<string>();
+  for (const item of [...BACKLOG_SCHEMA, ...GDRIVE_SCHEMA]) {
+    if ("type_def" in item && !seenTypes.has(item.type_def.name)) {
+      types.push({ ...item.type_def });
+      seenTypes.add(item.type_def.name);
+    } else if ("pred_def" in item && !seenPreds.has(item.pred_def.name)) {
+      predicates.push({ ...item.pred_def });
+      seenPreds.add(item.pred_def.name);
+    }
   }
   return { types, predicates };
 }
