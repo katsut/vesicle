@@ -36,6 +36,7 @@ import { authorizeUrl as gdriveAuthorizeUrl, exchangeCode as gdriveExchangeCode,
 import { DOC_MIME, PDF_MIME, downloadFile, exportDoc, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "./gdrive-api.ts";
 import { driveFileToBatch, sensitivityLabel } from "./gdrive.ts";
 import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, extractClaims, type DocContent, type DocPattern } from "./gdrive-extract.ts";
+import { evaluateSharing, recordSharingReview, type SharingDecision } from "./access-conformance.ts";
 import { StromaSink, type IngestStats } from "./etl/sink.ts";
 import { repairLateArrivals, type Repair } from "./etl/guard.ts";
 import { BacklogSource } from "./etl/source.ts";
@@ -957,6 +958,48 @@ app.post("/api/gdrive/extract", async (req, res) => {
     res.json({ ok: !failed.length, results, facts: totalFacts });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+// Access-policy conformance: the declared requirement (requires-floor, recorded at extraction) vs
+// the OBSERVED sharing (fresh ACL-derived tier from the Drive API). Deterministic, token-zero; a
+// document whose observed tier is looser than its required floor is over-shared.
+app.get("/api/gdrive/access-conformance", async (req, res) => {
+  try {
+    const conn = await gdriveConn();
+    const scope = parseBodyScope(req.query.scope);
+    if (!scope) return res.status(400).json({ error: "missing or invalid scope (my-drive | folder:<id-or-url> | drive:<id>)" });
+    const db = new Stroma(loadConfig().sink.url);
+    if (!(await db.health())) {
+      return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
+    }
+    const report = await evaluateSharing({ token: conn.accessToken }, scope, db);
+    res.json(report);
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+// The human verdict on a document's sharing, written back as facts (the review flywheel, Document
+// subjects). `confirmed` = the over-share is real and being fixed at the source; `waived` = the
+// sharing is intentionally broad.
+app.post("/api/gdrive/access-conformance/resolve", async (req, res) => {
+  try {
+    const node = Number(req.body?.node);
+    const decision = req.body?.decision as SharingDecision | undefined;
+    if (!Number.isInteger(node) || !["confirmed", "waived"].includes(decision ?? "")) {
+      return res.status(400).json({ error: "expected { node:int, decision: confirmed|waived, reviewer?, note? }" });
+    }
+    const reviewer = (req.body?.reviewer as string | undefined) ?? process.env.VESICLE_REVIEWER ?? "reviewer";
+    const note = req.body?.note as string | undefined;
+    const db = new Stroma(loadConfig().sink.url);
+    if (!(await db.health())) {
+      return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
+    }
+    await recordSharingReview(db, { node, decision: decision as SharingDecision, reviewer, note });
+    res.json({ ok: true, node, decision, reviewer });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
   }
 });
 
