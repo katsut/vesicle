@@ -32,6 +32,9 @@ import { checkDerivedPath, evaluateDerived } from "./deriveEval.ts";
 import { review, type Rule } from "./conformance.ts";
 import { recordReview, type Decision } from "./review.ts";
 import { authorizeUrl, exchangeCode, refreshToken as refreshOAuthToken } from "./backlog-oauth.ts";
+import { authorizeUrl as gdriveAuthorizeUrl, exchangeCode as gdriveExchangeCode, refreshToken as refreshGoogleToken } from "./gdrive-oauth.ts";
+import { getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "./gdrive-api.ts";
+import { driveFileToBatch } from "./gdrive.ts";
 import { StromaSink, type IngestStats } from "./etl/sink.ts";
 import { repairLateArrivals, type Repair } from "./etl/guard.ts";
 import { BacklogSource } from "./etl/source.ts";
@@ -398,12 +401,18 @@ const POLL_MS = Number(process.env.BACKLOG_POLL_MS ?? 15000);
 const pipelineById = (id: string): PipelineDef | undefined => loadConfig().pipelines.find((p) => p.id === id);
 
 async function pollOnce(pipelineId: string): Promise<void> {
+  // Dispatch by the lane's source — two poll-capable sources, no framework.
+  if (pipelineById(pipelineId)?.source === GDRIVE_ID) return pollOnceGdrive(pipelineId);
+  return pollOnceBacklog(pipelineId);
+}
+
+async function pollOnceBacklog(pipelineId: string): Promise<void> {
   const rt = pollTimers.get(pipelineId);
   const def = pipelineById(pipelineId);
   if (!rt || rt.busy || !def?.scope || !loadConfig().sources.backlog) return;
   rt.busy = true;
   try {
-    const conn = await freshBacklogConn(); // the only poll-capable source today
+    const conn = await freshBacklogConn();
     if (!conn) return; // refresh rejected → disconnected; the lane idles until re-connect
     let cursor = def.cursor ?? 0;
     let facts = 0;
@@ -511,6 +520,306 @@ app.get("/api/backlog/poll/status", (_req, res) => {
   res.json({ running, project: def?.scope ?? null, ingested: def?.ingested ?? 0, lastId: def?.cursor ?? 0, error: def?.lastError ?? null });
 });
 
+// --- Google Drive: OAuth connect + the structural lane (file/folder metadata, ownership, ACL —
+// no document bodies). Mirrors the Backlog section: one server-level connection in the config
+// store, one persisted poll lane whose id ("gdrive") doubles as the provenance value. Poll only —
+// Drive push notifications need a public channel endpoint, out of scope for this lane.
+//
+// Cursor: the Drive Changes API page token (an opaque STRING → PipelineDef.cursorToken). The first
+// cycle after start walks the full scope listing page by page, then adopts a changes token fetched
+// BEFORE the walk, so changes made during the listing replay on the next cycle instead of being lost.
+
+const GDRIVE_ID = "gdrive"; // lane id + provenance value
+let gdrivePending: string | null = null; // in-flight OAuth state (one at a time)
+
+function googleOauthApp(): { clientId: string; clientSecret: string; redirectUri: string } {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new Error("set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (from the Google Cloud OAuth client)");
+  return { clientId, clientSecret, redirectUri: `${publicUrl()}/api/gdrive/oauth/callback` };
+}
+
+// The Drive connection with a fresh access token. Same contract as freshBacklogConn, with Google's
+// one difference: the refresh response usually OMITS refresh_token (Google does not rotate it), so
+// the stored one is kept unless a new one arrives. A 4xx refresh (revoked grant) disconnects; a
+// transient failure throws and the caller retries next cycle.
+async function freshGdriveConn() {
+  const c = loadConfig().sources.gdrive;
+  if (!c) return null;
+  if (Date.now() < c.expiresAt - 60_000) return c;
+  try {
+    const oa = googleOauthApp();
+    const tok = await refreshGoogleToken({ clientId: oa.clientId, clientSecret: oa.clientSecret, refreshToken: c.refreshToken });
+    const next = saveConfig((cfg) => {
+      if (cfg.sources.gdrive) {
+        cfg.sources.gdrive.accessToken = tok.access_token;
+        if (tok.refresh_token) cfg.sources.gdrive.refreshToken = tok.refresh_token;
+        cfg.sources.gdrive.expiresAt = Date.now() + tok.expires_in * 1000;
+      }
+    });
+    console.log("  gdrive OAuth token refreshed");
+    return next.sources.gdrive ?? null;
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (/failed \(4\d\d\)/.test(msg)) {
+      saveConfig((cfg) => {
+        delete cfg.sources.gdrive;
+      });
+      console.log(`  gdrive OAuth refresh rejected — disconnected: ${msg}`);
+      return null;
+    }
+    throw e;
+  }
+}
+async function gdriveConn() {
+  const c = await freshGdriveConn();
+  if (!c) throw new Error("not connected to Google Drive — sign in first");
+  return c;
+}
+
+// PipelineDef.scope is a string — the Drive scope round-trips as "my-drive" | "folder:<id>" | "drive:<id>".
+function parseDriveScope(scope: string | undefined): DriveScope | null {
+  if (!scope) return null;
+  if (scope === "my-drive") return { kind: "my-drive" };
+  if (scope.startsWith("folder:")) return { kind: "folder", id: scope.slice("folder:".length) };
+  if (scope.startsWith("drive:")) return { kind: "drive", id: scope.slice("drive:".length) };
+  return null;
+}
+const driveScopeLabel = (s: DriveScope): string =>
+  s.kind === "my-drive" ? "My Drive" : s.kind === "folder" ? `folder ${s.id}` : `drive ${s.id}`;
+
+/** Hydrate (resolve shortcut, fetch missing ACL) → map → guarded ingest. Returns facts written. */
+async function ingestDriveFile(cfg: GdriveApiConfig, file: DriveFile, pipelineId: string): Promise<number> {
+  const batch = driveFileToBatch(await hydrateFile(cfg, file));
+  if (!batch.items.length) return 0;
+  const { repairs } = await repairLateArrivals(guardDb, sink, batch.items, { pipelineId });
+  logRepairs(pipelineId, repairs);
+  return batch.factCount;
+}
+
+async function pollOnceGdrive(pipelineId: string): Promise<void> {
+  const rt = pollTimers.get(pipelineId);
+  const def = pipelineById(pipelineId);
+  const scope = parseDriveScope(def?.scope);
+  if (!rt || rt.busy || !def || !scope || !loadConfig().sources.gdrive) return;
+  rt.busy = true;
+  try {
+    const conn = await freshGdriveConn();
+    if (!conn) return; // refresh rejected → disconnected; the lane idles until re-connect
+    const cfg: GdriveApiConfig = { token: conn.accessToken };
+    const driveId = scope.kind === "drive" ? scope.id : undefined;
+    let files = 0;
+    let facts = 0;
+    const advance = (mutate: (d: PipelineDef) => void, pageFacts: number): void => {
+      saveConfig((c) => {
+        const d = c.pipelines.find((p) => p.id === pipelineId);
+        if (!d) return;
+        d.ingested = (d.ingested ?? 0) + pageFacts;
+        if (pageFacts) d.lastEventAt = Date.now();
+        d.lastError = null;
+        mutate(d);
+      });
+    };
+
+    if (!def.cursorToken) {
+      // First cycle: fetch the changes cursor FIRST, then walk the full scope listing. Counters
+      // persist per page; a crash mid-walk restarts the listing (idempotent — deterministic ids,
+      // re-emitted facts supersede in place).
+      const startToken = await getStartPageToken(cfg, driveId);
+      let pageToken: string | undefined;
+      do {
+        const page = await listFiles(cfg, { scope, pageToken });
+        let pageFacts = 0;
+        for (const f of page.files) pageFacts += await ingestDriveFile(cfg, f, pipelineId);
+        files += page.files.length;
+        facts += pageFacts;
+        pageToken = page.nextPageToken;
+        advance(() => {}, pageFacts);
+      } while (pageToken);
+      advance((d) => {
+        d.cursorToken = startToken;
+      }, 0);
+      console.log(`  gdrive initial listing (${driveScopeLabel(scope)}): ${files} files → ${facts} facts; cursor switched to changes token`);
+      return;
+    }
+
+    // Steady state: drain the changes feed. nextPageToken = more pages now; newStartPageToken =
+    // caught up until the next cycle. The token persists after every page.
+    let token = def.cursorToken;
+    let caughtUp = false;
+    while (!caughtUp) {
+      const r = await listChanges(cfg, token, driveId);
+      let pageFacts = 0;
+      for (const ch of r.changes) {
+        if (ch.removed || !ch.file || ch.file.trashed) continue; // removals/trash: deferred (no node deletion v1)
+        // The changes feed is corpus-wide for user scopes — keep a folder lane to its folder.
+        if (scope.kind === "folder" && !(ch.file.parents ?? []).includes(scope.id)) continue;
+        pageFacts += await ingestDriveFile(cfg, ch.file, pipelineId);
+        files++;
+      }
+      facts += pageFacts;
+      if (r.nextPageToken) token = r.nextPageToken;
+      else {
+        token = r.newStartPageToken ?? token;
+        caughtUp = true;
+      }
+      advance((d) => {
+        d.cursorToken = token;
+      }, pageFacts);
+    }
+    if (files) console.log(`  gdrive poll (${driveScopeLabel(scope)}): ${files} changed files → ${facts} facts`);
+  } catch (e) {
+    saveConfig((c) => {
+      const d = c.pipelines.find((p) => p.id === pipelineId);
+      if (d) d.lastError = (e as Error).message;
+    });
+    console.log(`  gdrive poll error: ${(e as Error).message}`);
+  } finally {
+    rt.busy = false;
+  }
+}
+
+app.get("/api/gdrive/status", (_req, res) => {
+  const c = loadConfig().sources.gdrive;
+  res.json({ connected: !!c, scopeKind: c?.scopeKind ?? null, scopeId: c?.scopeId ?? null });
+});
+
+app.get("/api/gdrive/oauth/start", (_req, res) => {
+  try {
+    const oa = googleOauthApp();
+    const state = randomBytes(16).toString("hex");
+    gdrivePending = state;
+    res.redirect(gdriveAuthorizeUrl(oa.clientId, oa.redirectUri, state));
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+app.get("/api/gdrive/oauth/callback", async (req, res) => {
+  try {
+    if (!gdrivePending) return res.status(400).type("html").send("<p>OAuth session expired — start again from <a href='/sources.html'>Sources</a>.</p>");
+    if (String(req.query.state ?? "") !== gdrivePending) return res.status(400).send("state mismatch");
+    const code = String(req.query.code ?? "");
+    if (!code) return res.status(400).send("no authorization code");
+    const oa = googleOauthApp();
+    const tok = await gdriveExchangeCode({ clientId: oa.clientId, clientSecret: oa.clientSecret, code, redirectUri: oa.redirectUri });
+    // prompt=consent makes Google include refresh_token on the exchange; keep an already-stored one
+    // as the fallback (re-connect without revocation can omit it in edge cases).
+    const refresh = tok.refresh_token ?? loadConfig().sources.gdrive?.refreshToken;
+    if (!refresh) {
+      return res.status(500).type("html").send("<p>Google returned no refresh token — revoke the app's access at myaccount.google.com/permissions and connect again.</p>");
+    }
+    saveConfig((c) => {
+      c.sources.gdrive = { accessToken: tok.access_token, refreshToken: refresh, expiresAt: Date.now() + tok.expires_in * 1000 };
+    });
+    gdrivePending = null;
+    res.redirect("/sources.html?connected=gdrive");
+  } catch (e) {
+    res.status(500).type("html").send(`<p>OAuth failed: ${(e as Error).message}</p>`);
+  }
+});
+
+app.post("/api/gdrive/disconnect", (_req, res) => {
+  saveConfig((c) => {
+    delete c.sources.gdrive;
+  });
+  res.json({ ok: true });
+});
+
+// Scope picker: "My Drive" + the user's shared drives. A folder scope is entered by pasting a
+// folder URL/id into the card (parsed server-side by poll/start).
+app.get("/api/gdrive/scopes", async (_req, res) => {
+  try {
+    const conn = await gdriveConn();
+    const drives = await listDrives({ token: conn.accessToken });
+    res.json({
+      scopes: [
+        { kind: "my-drive", id: null, name: "My Drive" },
+        ...drives.map((d) => ({ kind: "drive", id: d.id, name: d.name })),
+      ],
+    });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+app.post("/api/gdrive/poll/start", (req, res) => {
+  try {
+    if (!loadConfig().sources.gdrive) return res.status(400).json({ error: "not connected to Google Drive" });
+    const kind = String(req.body?.scope?.kind ?? "").trim();
+    const rawId = String(req.body?.scope?.id ?? "").trim();
+    let scope: DriveScope;
+    if (kind === "my-drive") scope = { kind: "my-drive" };
+    else if (kind === "drive") {
+      if (!rawId) return res.status(400).json({ error: "missing shared-drive id" });
+      scope = { kind: "drive", id: rawId };
+    } else if (kind === "folder") {
+      const id = parseFolderId(rawId);
+      if (!id) return res.status(400).json({ error: "not a Drive folder id or folder URL" });
+      scope = { kind: "folder", id };
+    } else {
+      return res.status(400).json({ error: "scope.kind must be my-drive | drive | folder" });
+    }
+    const scopeStr = scope.kind === "my-drive" ? "my-drive" : `${scope.kind}:${scope.id}`;
+    // Upsert the lane. Same scope keeps the cursor token (a restart resumes the changes stream);
+    // a new scope re-runs the initial listing. The id "gdrive" doubles as the provenance value.
+    saveConfig((cfg) => {
+      const def = cfg.pipelines.find((p) => p.id === GDRIVE_ID);
+      if (def) {
+        if (def.scope !== scopeStr) {
+          def.scope = scopeStr;
+          delete def.cursorToken;
+          def.ingested = 0;
+        }
+        def.name = `Google Drive · ${driveScopeLabel(scope)}`;
+        def.state = "running";
+        def.lastError = null;
+      } else {
+        cfg.pipelines.push({
+          id: GDRIVE_ID,
+          name: `Google Drive · ${driveScopeLabel(scope)}`,
+          source: GDRIVE_ID,
+          mode: "poll",
+          scope: scopeStr,
+          state: "running",
+          ingested: 0,
+          lastError: null,
+        });
+      }
+      if (cfg.sources.gdrive) {
+        cfg.sources.gdrive.scopeKind = scope.kind;
+        cfg.sources.gdrive.scopeId = scope.kind === "my-drive" ? undefined : scope.id;
+      }
+    });
+    startPoller(GDRIVE_ID);
+    res.json({ ok: true, scope: scopeStr, intervalMs: POLL_MS });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+app.post("/api/gdrive/poll/stop", (_req, res) => {
+  stopPoller(GDRIVE_ID);
+  saveConfig((cfg) => {
+    const def = cfg.pipelines.find((p) => p.id === GDRIVE_ID);
+    if (def) def.state = "paused"; // keep the cursor token — a later start on the same scope resumes
+  });
+  res.json({ ok: true });
+});
+
+app.get("/api/gdrive/poll/status", (_req, res) => {
+  const def = pipelineById(GDRIVE_ID);
+  const running = def?.state === "running" && pollTimers.has(GDRIVE_ID);
+  res.json({
+    running,
+    scope: def?.scope ?? null,
+    ingested: def?.ingested ?? 0,
+    // listing = the initial full walk; changes = steady-state incremental cursor
+    phase: def ? (def.cursorToken ? "changes" : "listing") : null,
+    error: def?.lastError ?? null,
+  });
+});
+
 // All persisted lanes plus the capped run history — the read model for the pipelines UI. Additive:
 // the per-source endpoints above keep serving the existing pages.
 app.get("/api/pipelines", (_req, res) => {
@@ -522,7 +831,8 @@ app.get("/api/pipelines", (_req, res) => {
 // server restart must not silently stop a stream (the persisted cursor picks up where it stopped).
 for (const def of loadConfig().pipelines) {
   if (def.mode !== "poll" || def.state !== "running") continue;
-  if (def.source === "backlog" && !loadConfig().sources.backlog) {
+  const connected = def.source === GDRIVE_ID ? !!loadConfig().sources.gdrive : !!loadConfig().sources.backlog;
+  if (!connected) {
     console.log(`  pipeline "${def.id}": left running but ${def.source} is not connected — not resumed`);
     continue;
   }

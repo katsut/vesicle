@@ -138,6 +138,11 @@
       <p class="sdesc" data-i18n="backlog_desc"></p>
       <div id="blBody"><div class="loading" data-i18n="loading"></div></div>
     </div>
+    <div class="card" id="gdriveCard">
+      <div class="shead"><span class="ic">D</span><b>Google Drive</b><span class="st" id="gdStatus" data-i18n="st_checking"></span></div>
+      <p class="sdesc" data-i18n="gdrive_desc"></p>
+      <div id="gdBody"><div class="loading" data-i18n="loading"></div></div>
+    </div>
     <div class="card planned">
       <div class="shead"><span class="ic">P</span><b>PostgreSQL</b><span class="st" data-i18n="planned"></span></div>
       <p class="sdesc" data-i18n="planned_desc"></p>
@@ -148,10 +153,6 @@
     </div>
     <div class="card planned">
       <div class="shead"><span class="ic txt">C</span><b>Confluence</b><span class="st" data-i18n="planned"></span></div>
-      <p class="sdesc" data-i18n="planned_desc"></p>
-    </div>
-    <div class="card planned">
-      <div class="shead"><span class="ic txt">D</span><b>Google Docs</b><span class="st" data-i18n="planned"></span></div>
       <p class="sdesc" data-i18n="planned_desc"></p>
     </div>
   </div>
@@ -188,6 +189,16 @@ const I18N = {
     lanes_note: "Connected sources feed ingestion lanes — watch them run in <a href=\"/pipelines.html\">Pipelines</a>.",
     err_unauthorized: "Sign-in required — <a href=\"/login\">sign in</a> and reload.",
     err_request: "Request failed: {e}",
+    gdrive_desc: "Stream file & folder metadata and sharing ACLs from Google Drive. OAuth only — read-only scope.",
+    oauth_done_gdrive: "Google Drive connected — pick a scope and start streaming.",
+    gd_connect_btn: "Connect with Google",
+    gd_scope_label: "Scope", gd_folder_option: "Folder (paste URL below)…",
+    gd_folder_label: "Folder URL or id", gd_folder_invalid: "Paste a Drive folder URL or id.",
+    gd_start_poll: "Start streaming (poll)",
+    gd_hint: "Streams <b>structure, not content</b>: names, folders, owners, and per-file access grants. The ACL also derives each file's sensitivity label.",
+    gd_streaming_line: "streaming {scope} · {n} facts ingested",
+    gd_phase_listing: "initial listing…",
+    gd_msg_started: "Streaming {scope} — full listing first, then Drive changes over OAuth (no public URL needed).",
   },
   ja: {
     nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル",
@@ -212,6 +223,16 @@ const I18N = {
     lanes_note: "接続済みのソースは取り込みレーンに供給されます — 稼働状況は <a href=\"/pipelines.html\">Pipelines</a> で確認できます。",
     err_unauthorized: "サインインが必要です — <a href=\"/login\">サインイン</a>して再読み込みしてください。",
     err_request: "リクエストに失敗しました: {e}",
+    gdrive_desc: "Google Drive のファイル・フォルダーのメタデータと共有 ACL をストリーミング。OAuth のみ — 読み取り専用スコープ。",
+    oauth_done_gdrive: "Google Drive に接続しました — スコープを選んでストリーミングを開始してください。",
+    gd_connect_btn: "Google で接続",
+    gd_scope_label: "スコープ", gd_folder_option: "フォルダー（下に URL を貼り付け）…",
+    gd_folder_label: "フォルダーの URL または ID", gd_folder_invalid: "Drive フォルダーの URL または ID を貼り付けてください。",
+    gd_start_poll: "ストリーミング開始（ポーリング）",
+    gd_hint: "取り込むのは<b>本文ではなく構造</b>：名前・フォルダー階層・所有者・ファイルごとのアクセス権。ACL から各ファイルの機密ラベルも導出します。",
+    gd_streaming_line: "{scope} をストリーミング中 · {n} facts 取り込み済み",
+    gd_phase_listing: "初回リスティング中…",
+    gd_msg_started: "{scope} のストリーミングを開始 — まず全件リスティング、その後は OAuth 経由で Drive の変更を取得します（公開 URL 不要）。",
   },
   zh: {
     nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型",
@@ -236,6 +257,16 @@ const I18N = {
     lanes_note: "已连接的数据源供给摄取通道 — 在 <a href=\"/pipelines.html\">Pipelines</a> 中查看运行情况。",
     err_unauthorized: "需要登录 — 请<a href=\"/login\">登录</a>后重新加载。",
     err_request: "请求失败: {e}",
+    gdrive_desc: "从 Google Drive 流式接收文件与文件夹的元数据及共享 ACL。仅 OAuth — 只读权限。",
+    oauth_done_gdrive: "Google Drive 已连接 — 选择范围并开始流式。",
+    gd_connect_btn: "使用 Google 连接",
+    gd_scope_label: "范围", gd_folder_option: "文件夹（在下方粘贴 URL）…",
+    gd_folder_label: "文件夹 URL 或 ID", gd_folder_invalid: "请粘贴 Drive 文件夹的 URL 或 ID。",
+    gd_start_poll: "开始流式（轮询）",
+    gd_hint: "摄取的是<b>结构而非内容</b>：名称、文件夹层级、所有者以及每个文件的访问授权。ACL 还用于推导每个文件的敏感级标签。",
+    gd_streaming_line: "正在流式 {scope} · 已摄取 {n} 条事实",
+    gd_phase_listing: "首次列举中…",
+    gd_msg_started: "已开始流式 {scope} — 先全量列举，随后通过 OAuth 拉取 Drive 变更（无需公开 URL）。",
   },
 };
 let LANG = "en";
@@ -248,6 +279,7 @@ function applyLang() {
   document.querySelectorAll("[data-i18n]").forEach((e) => { e.innerHTML = t(e.getAttribute("data-i18n")); });
   document.querySelectorAll("[data-i18n-title]").forEach((e) => { e.title = t(e.getAttribute("data-i18n-title")); });
   renderBacklog();
+  renderGdrive();
 }
 
 const store = {
@@ -416,16 +448,159 @@ async function refresh() {
   }
 }
 
-// arriving from the OAuth callback (/connect?connected=1 → here): confirm and clean the URL
-if (new URLSearchParams(location.search).get("connected") === "1") {
-  $("#oauthDone").hidden = false;
-  history.replaceState(null, "", location.pathname);
+// --- Google Drive card state machine: loading → error | disconnected | connected (mirrors Backlog) ---
+const GD = { state: "loading", scopes: null, scopesError: null, poll: null, msg: null, error: null };
+let gdPollTimer = null;
+
+function setGdStatusChip() {
+  const chip = $("#gdStatus");
+  chip.classList.remove("ok", "bad");
+  if (GD.state === "loading") chip.textContent = t("st_checking");
+  else if (GD.state === "error") { chip.textContent = t("st_error"); chip.classList.add("bad"); }
+  else if (GD.state === "connected") { chip.textContent = t("st_connected"); chip.classList.add("ok"); }
+  else chip.textContent = t("st_disconnected");
+}
+
+// "my-drive" | "drive:<id>" | "folder:<id>" → a display name (shared-drive ids resolve via the picker list)
+function gdScopeName(scope) {
+  if (!scope) return "?";
+  if (scope === "my-drive") return "My Drive";
+  if (scope.startsWith("drive:")) {
+    const id = scope.slice(6);
+    const d = (GD.scopes ?? []).find((s) => s.kind === "drive" && s.id === id);
+    return d ? d.name : id;
+  }
+  if (scope.startsWith("folder:")) return "folder " + scope.slice(7);
+  return scope;
+}
+function gdStreamLine() {
+  let line = t("gd_streaming_line", { scope: esc(gdScopeName(GD.poll?.scope)), n: GD.poll?.ingested ?? 0 });
+  if (GD.poll?.phase === "listing") line += " · " + t("gd_phase_listing");
+  if (GD.poll?.error) line += ` · <span style="color:var(--bad)">${esc(GD.poll.error)}</span>`;
+  return line;
+}
+
+function renderGdrive() {
+  setGdStatusChip();
+  const root = $("#gdBody"); root.innerHTML = "";
+  if (GD.state === "loading") { root.innerHTML = `<div class="loading">${t("loading")}</div>`; return; }
+  if (GD.state === "error") {
+    root.innerHTML = `<div class="err">${GD.error.status === 401 ? t("err_unauthorized") : esc(t("err_request", { e: GD.error.message }))}</div>`;
+    return;
+  }
+  if (GD.state === "disconnected") {
+    root.innerHTML = `
+      <form action="/api/gdrive/oauth/start" method="get">
+        <div class="actions"><button class="btn" type="submit">${t("gd_connect_btn")}</button></div>
+      </form>`;
+    return;
+  }
+  // connected
+  const driveOpts = (GD.scopes ?? []).filter((s) => s.kind === "drive")
+    .map((s) => `<option value="drive:${esc(s.id)}">${esc(s.name)}</option>`).join("");
+  const running = !!GD.poll?.running;
+  root.innerHTML = `
+    <div class="conn"><span class="dot"></span> ${t("connected_to")} <b>Google Drive</b> · <a href="#" id="gdDisconnect">${t("disconnect")}</a></div>
+    <p class="hint">${t("gd_hint")}</p>
+    <label for="gdScope">${t("gd_scope_label")}</label>
+    <select id="gdScope">
+      <option value="my-drive">My Drive</option>
+      ${driveOpts}
+      <option value="folder">${esc(t("gd_folder_option"))}</option>
+    </select>
+    <div id="gdFolderWrap" hidden style="margin-top:9px">
+      <label for="gdFolder">${t("gd_folder_label")}</label>
+      <input id="gdFolder" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="actions">
+      <button class="btn" id="gdStart">${t("gd_start_poll")}</button>
+      <button class="btn ghost" id="gdStop" ${running ? "" : "hidden"}>${t("stop_poll")}</button>
+    </div>
+    <div class="pollstat" id="gdPollstat" ${running ? "" : "hidden"}></div>
+    <div id="gdMsg"></div>`;
+  if (GD.scopesError) gdShow("err", GD.scopesError);
+  const syncFolder = () => { $("#gdFolderWrap").hidden = $("#gdScope").value !== "folder"; };
+  $("#gdScope").onchange = syncFolder;
+  if (running && GD.poll.scope) {
+    if (GD.poll.scope.startsWith("folder:")) { $("#gdScope").value = "folder"; $("#gdFolder").value = GD.poll.scope.slice(7); }
+    else if ([...$("#gdScope").options].some((o) => o.value === GD.poll.scope)) $("#gdScope").value = GD.poll.scope;
+    syncFolder();
+    $("#gdPollstat").innerHTML = `<span class="dot"></span> ${gdStreamLine()}`;
+  }
+  if (GD.msg) gdShow(GD.msg.kind, GD.msg.text);
+  $("#gdDisconnect").onclick = async (e) => {
+    e.preventDefault();
+    try { await jf("/api/gdrive/disconnect", { method: "POST" }); GD.msg = null; await refreshGdrive(); }
+    catch (err) { gdShow("err", err.message); }
+  };
+  $("#gdStart").onclick = async () => {
+    const v = $("#gdScope").value;
+    let scope;
+    if (v === "my-drive") scope = { kind: "my-drive" };
+    else if (v === "folder") {
+      const raw = $("#gdFolder").value.trim();
+      if (!raw) { gdShow("err", t("gd_folder_invalid")); return; }
+      scope = { kind: "folder", id: raw };
+    } else scope = { kind: "drive", id: v.slice(6) };
+    $("#gdStart").disabled = true;
+    try {
+      const r = await jf("/api/gdrive/poll/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope }) });
+      GD.msg = { kind: "ok", text: t("gd_msg_started", { scope: gdScopeName(r.scope) }) };
+      await gdPollStatus();
+    } catch (e) { gdShow("err", e.message); }
+    finally { const b = $("#gdStart"); if (b) b.disabled = false; }
+  };
+  $("#gdStop").onclick = async () => {
+    try { await jf("/api/gdrive/poll/stop", { method: "POST" }); GD.msg = { kind: "ok", text: t("msg_stopped") }; await gdPollStatus(); }
+    catch (e) { gdShow("err", e.message); }
+  };
+}
+function gdShow(kind, text) { const m = $("#gdMsg"); if (m) { m.className = "msg " + kind; m.textContent = text; } }
+
+async function gdPollStatus() {
+  try {
+    const prev = GD.poll?.running;
+    GD.poll = await jf("/api/gdrive/poll/status");
+    if (GD.poll.running) { if (!gdPollTimer) gdPollTimer = setInterval(gdPollStatus, 4000); }
+    else if (gdPollTimer) { clearInterval(gdPollTimer); gdPollTimer = null; }
+    if (GD.poll.running !== prev) renderGdrive();
+    else if (GD.poll.running) { // refresh the counter line in place
+      const ps = $("#gdPollstat");
+      if (ps) { ps.hidden = false; ps.innerHTML = `<span class="dot"></span> ${gdStreamLine()}`; }
+    }
+  } catch { /* transient poll-status failure: keep the last known state */ }
+}
+
+async function refreshGdrive() {
+  try {
+    const s = await jf("/api/gdrive/status");
+    if (!s.connected) { GD.state = "disconnected"; renderGdrive(); return; }
+    GD.state = "connected";
+    GD.scopes = null; GD.scopesError = null;
+    try { GD.scopes = (await jf("/api/gdrive/scopes")).scopes; }
+    catch (e) { GD.scopesError = e.status === 401 ? t("err_unauthorized") : e.message; }
+    await gdPollStatus();
+    renderGdrive();
+  } catch (e) {
+    GD.state = "error"; GD.error = e; renderGdrive();
+  }
+}
+
+// arriving from an OAuth callback (?connected=1 → Backlog, ?connected=gdrive → Drive): confirm and clean the URL
+{
+  const connectedParam = new URLSearchParams(location.search).get("connected");
+  if (connectedParam) {
+    if (connectedParam === "gdrive") $("#oauthDone").setAttribute("data-i18n", "oauth_done_gdrive");
+    $("#oauthDone").hidden = false;
+    history.replaceState(null, "", location.pathname);
+  }
 }
 
 applyTheme();
 setLang(LANG);
 refreshStatus();
 refresh();
+refreshGdrive();
 </script>
 </body>
 </html>

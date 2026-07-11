@@ -21,6 +21,18 @@ export interface BacklogConnection {
   projectKey?: string;
 }
 
+/** The saved Google Drive connection: the OAuth grant plus the last scope picked for streaming.
+ *  Google's endpoints are central (no per-tenant host), and the refresh token is NOT rotated on
+ *  refresh — the refresh flow keeps the stored one when the response omits it. */
+export interface GdriveConnection {
+  accessToken: string;
+  refreshToken: string;
+  /** unix-ms expiry of the access token */
+  expiresAt: number;
+  scopeKind?: "my-drive" | "folder" | "drive";
+  scopeId?: string;
+}
+
 /** One persisted ingestion lane: a single source wired into the sink, with lifecycle and counters.
  *  The pipeline id doubles as the provenance value the sink stamps on facts (see StromaSink.ingest),
  *  so the default Backlog poll lane uses id "backlog" — the wire value the graph already contains. */
@@ -34,8 +46,11 @@ export interface PipelineDef {
   scope?: string;
   /** lifecycle: a running poll lane is resumed on boot; a paused one is not */
   state: "running" | "paused";
-  /** last seen upstream event id (poll mode); reset when the scope changes */
+  /** last seen upstream event id (poll mode, numeric cursors — Backlog); reset when the scope changes */
   cursor?: number;
+  /** opaque string cursor (poll mode, token cursors — the Drive Changes page token); absent until the
+   *  lane's initial full listing completes, reset when the scope changes */
+  cursorToken?: string;
   /** facts ingested since the cursor was last reset */
   ingested?: number;
   /** unix-ms of the last poll cycle that saw events */
@@ -58,7 +73,7 @@ export interface PipelineRun {
 
 export interface ConnectorConfig {
   sink: { url?: string };
-  sources: { backlog?: BacklogConnection };
+  sources: { backlog?: BacklogConnection; gdrive?: GdriveConnection };
   /** the shared type layer — ONE per deployment; seeded from the Backlog declarations when empty */
   model: SharedModel;
   /** per-source mappings (bindings onto the shared layer), keyed by source id */
