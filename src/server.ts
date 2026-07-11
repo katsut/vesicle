@@ -33,8 +33,9 @@ import { review, type Rule } from "./conformance.ts";
 import { recordReview, type Decision } from "./review.ts";
 import { authorizeUrl, exchangeCode, refreshToken as refreshOAuthToken } from "./backlog-oauth.ts";
 import { authorizeUrl as gdriveAuthorizeUrl, exchangeCode as gdriveExchangeCode, refreshToken as refreshGoogleToken } from "./gdrive-oauth.ts";
-import { getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "./gdrive-api.ts";
-import { driveFileToBatch } from "./gdrive.ts";
+import { DOC_MIME, PDF_MIME, downloadFile, exportDoc, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "./gdrive-api.ts";
+import { driveFileToBatch, sensitivityLabel } from "./gdrive.ts";
+import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, extractClaims, type DocContent, type DocPattern } from "./gdrive-extract.ts";
 import { StromaSink, type IngestStats } from "./etl/sink.ts";
 import { repairLateArrivals, type Repair } from "./etl/guard.ts";
 import { BacklogSource } from "./etl/source.ts";
@@ -818,6 +819,145 @@ app.get("/api/gdrive/poll/status", (_req, res) => {
     phase: def ? (def.cursorToken ? "changes" : "listing") : null,
     error: def?.lastError ?? null,
   });
+});
+
+// --- Drive body lane: curated one-shot extraction (issue-driven, never on the poll). The funnel
+// lists and triages a scope BEFORE any LLM call; the extract endpoint reads only the files the
+// human confirmed, one LLM call per document, sequentially (cost control). Runs record under the
+// one-shot pipeline id "gdrive-extract"; facts carry per-document provenance drive:<fileId> set by
+// the mapping itself (the sink's pipeline-id stamp only fills unset sources).
+
+const GDRIVE_EXTRACT_ID = "gdrive-extract"; // one-shot run id in the pipeline history
+const FUNNEL_CAP = 200; // no pagination UI — cap the funnel and flag truncation
+
+// The funnel/extract scope arrives as the same round-trip string the poll lane uses
+// ("my-drive" | "folder:<id-or-url>" | "drive:<id>"); folder ids accept pasted URLs.
+function parseBodyScope(raw: unknown): DriveScope | null {
+  const scope = parseDriveScope(typeof raw === "string" && raw ? raw : pipelineById(GDRIVE_ID)?.scope);
+  if (scope?.kind === "folder") {
+    const id = parseFolderId(scope.id);
+    return id ? { kind: "folder", id } : null;
+  }
+  return scope;
+}
+
+// v1: the extraction pattern is request-scoped — sent in the body, defaulting to the regulation
+// pattern. Validated structurally here so a malformed pattern fails the request, not the LLM call.
+function parseDocPattern(raw: unknown): DocPattern | { error: string } {
+  if (raw == null) return DEFAULT_PATTERN;
+  const p = raw as Partial<DocPattern>;
+  if (!Array.isArray(p.entity_types) || !p.entity_types.length || !p.entity_types.every((t) => typeof t === "string" && t)) {
+    return { error: "pattern.entity_types must be a non-empty array of type names" };
+  }
+  if (!Array.isArray(p.predicates) || !p.predicates.length) {
+    return { error: "pattern.predicates must be a non-empty array" };
+  }
+  for (const x of p.predicates) {
+    if (
+      typeof x?.name !== "string" || !x.name || typeof x.from !== "string" || typeof x.to !== "string" ||
+      (x.kind !== "edge" && x.kind !== "value") || (x.card !== "one" && x.card !== "many")
+    ) {
+      return { error: `pattern predicate "${String(x?.name ?? "?")}" needs name/from/to, kind edge|value, card one|many` };
+    }
+  }
+  const out: DocPattern = { entity_types: p.entity_types, predicates: p.predicates };
+  if (typeof p.date_field === "string" && p.date_field) out.date_field = p.date_field;
+  return out;
+}
+
+// Curation BEFORE any LLM call: list the scope (capped), hydrate (resolve shortcuts, fetch missing
+// ACLs), and triage — readable PDFs/Docs with sensitivity tier + draft flag, everything else
+// counted per mimeType.
+app.get("/api/gdrive/funnel", async (req, res) => {
+  try {
+    const conn = await gdriveConn();
+    const scope = parseBodyScope(req.query.scope);
+    if (!scope) return res.status(400).json({ error: "missing or invalid scope (my-drive | folder:<id-or-url> | drive:<id>)" });
+    const cfg: GdriveApiConfig = { token: conn.accessToken };
+    const listed: DriveFile[] = [];
+    let pageToken: string | undefined;
+    let truncated = false;
+    do {
+      const page = await listFiles(cfg, { scope, pageToken });
+      listed.push(...page.files);
+      pageToken = page.nextPageToken;
+      if (listed.length >= FUNNEL_CAP) {
+        truncated = listed.length > FUNNEL_CAP || !!pageToken;
+        listed.length = FUNNEL_CAP;
+        break;
+      }
+    } while (pageToken);
+    const hydrated: DriveFile[] = [];
+    for (const f of listed) hydrated.push(await hydrateFile(cfg, f));
+    const { files, skipped } = classifyFiles(hydrated);
+    res.json({ files, skipped, total: listed.length, truncated });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+// The one-shot body run over the confirmed selection. Files are processed SEQUENTIALLY (one LLM
+// call per document); a per-file failure is reported, not fatal to the run. Records ONE run in the
+// pipeline history per invocation.
+app.post("/api/gdrive/extract", async (req, res) => {
+  try {
+    const conn = await gdriveConn();
+    const fileIds = req.body?.fileIds as unknown;
+    if (!Array.isArray(fileIds) || !fileIds.length || !fileIds.every((x): x is string => typeof x === "string" && !!x)) {
+      return res.status(400).json({ error: "fileIds must be a non-empty array of Drive file ids" });
+    }
+    const pattern = parseDocPattern(req.body?.pattern);
+    if ("error" in pattern) return res.status(400).json({ error: pattern.error });
+    if (!(await sink.health())) {
+      return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
+    }
+    const cfg: GdriveApiConfig = { token: conn.accessToken };
+    const model = loadConfig().model;
+    const startedAt = Date.now();
+    const results: Array<{ fileId: string; name: string; ok: boolean; facts: number; error?: string }> = [];
+    let totalFacts = 0;
+    for (const fileId of fileIds) {
+      let name = fileId;
+      try {
+        const file = await hydrateFile(cfg, await getFile(cfg, fileId));
+        name = file.name ?? fileId;
+        const mime = file.mimeType ?? "";
+        let doc: DocContent;
+        if (mime === DOC_MIME) doc = { kind: "text", text: await exportDoc(cfg, file.id) };
+        else if (mime === PDF_MIME) doc = { kind: "pdf", base64: (await downloadFile(cfg, file.id)).base64 };
+        else throw new Error(`unsupported mimeType ${mime || "(none)"} — only PDF and Google Docs are readable`);
+        const claims = await extractClaims(pattern, doc);
+        const batch = claimsToBatch({
+          fileId: file.id,
+          docLabel: sensitivityLabel(file.permissions),
+          modifiedTime: file.modifiedTime,
+          pattern,
+          claims,
+          model,
+        });
+        await sink.ingest(batch.items, { pipelineId: GDRIVE_EXTRACT_ID });
+        totalFacts += batch.factCount;
+        results.push({ fileId, name, ok: true, facts: batch.factCount });
+        console.log(`  gdrive extract: "${name}" → ${batch.factCount} facts (${batch.entityCount} entities${batch.requiresFloor != null ? `, requires-floor ${batch.requiresFloor}` : ""})`);
+      } catch (e) {
+        results.push({ fileId, name, ok: false, facts: 0, error: (e as Error).message });
+        console.log(`  gdrive extract: "${name}" failed: ${(e as Error).message}`);
+      }
+    }
+    const failed = results.filter((r) => !r.ok);
+    recordRun({
+      pipelineId: GDRIVE_EXTRACT_ID,
+      kind: "one-shot",
+      startedAt,
+      finishedAt: Date.now(),
+      events: results.length,
+      facts: totalFacts,
+      error: failed.length ? `${failed.length}/${results.length} files failed: ${failed[0]!.error}` : null,
+    });
+    res.json({ ok: !failed.length, results, facts: totalFacts });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
 });
 
 // All persisted lanes plus the capped run history — the read model for the pipelines UI. Additive:

@@ -13,6 +13,7 @@
     "conformance": "tsx src/cli/conformance.ts",
     "resolve": "tsx src/cli/resolve.ts",
     "slice": "tsx src/cli/slice.ts",
+    "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

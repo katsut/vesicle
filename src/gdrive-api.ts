@@ -1,5 +1,6 @@
-// Minimal Google Drive v3 REST client for the structural lane (metadata + permissions). OAuth only —
-// every call authenticates with an OAuth 2.0 bearer token (mirrors backlog-api.ts: plain fetch, no SDK).
+// Minimal Google Drive v3 REST client for the structural lane (metadata + permissions) and the body
+// lane's content fetches. OAuth only — every call authenticates with an OAuth 2.0 bearer token
+// (mirrors backlog-api.ts: plain fetch, no SDK).
 //
 //   GET /drive/v3/files                    (scope listing — the first-poll full walk)
 //   GET /drive/v3/files/:id                (shortcut target / single-file metadata)
@@ -7,6 +8,8 @@
 //   GET /drive/v3/changes/startPageToken   (the poll cursor's origin)
 //   GET /drive/v3/changes                  (incremental poll — the cursor is an opaque STRING token)
 //   GET /drive/v3/drives                   (shared drives, for the scope picker)
+//   GET /drive/v3/files/:id/export         (Google Doc body → text/plain, body lane)
+//   GET /drive/v3/files/:id?alt=media      (binary bytes — PDFs, body lane; capped)
 
 export interface GdriveApiConfig {
   /** OAuth 2.0 access token */
@@ -63,6 +66,8 @@ export interface SharedDrive {
 
 export const FOLDER_MIME = "application/vnd.google-apps.folder";
 export const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
+export const DOC_MIME = "application/vnd.google-apps.document";
+export const PDF_MIME = "application/pdf";
 
 const API = "https://www.googleapis.com/drive/v3";
 const FILE_FIELDS =
@@ -194,6 +199,38 @@ export async function listDrives(cfg: GdriveApiConfig): Promise<SharedDrive[]> {
     pageToken = j.nextPageToken;
   } while (pageToken);
   return out;
+}
+
+/** A Google Doc's body exported as plain text (a Doc has no downloadable bytes — export converts).
+ *  Google caps exports at 10 MB of converted content; over-cap and permission errors surface as-is. */
+export async function exportDoc(cfg: GdriveApiConfig, fileId: string): Promise<string> {
+  const p = new URLSearchParams({ mimeType: "text/plain" });
+  const r = await fetch(`${API}/files/${encodeURIComponent(fileId)}/export?${p.toString()}`, { headers: authHeaders(cfg) });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`export doc failed (${r.status}): ${text.slice(0, 300)}`);
+  return text;
+}
+
+/** The body lane's per-file size cap: a document bound for a single LLM call, not an archive sync. */
+export const MAX_DOWNLOAD_BYTES = 15 * 1024 * 1024;
+
+/** A binary file's bytes (`alt=media`) as base64 — the body lane's PDF fetch. Capped at
+ *  MAX_DOWNLOAD_BYTES: rejected up front when the response declares its length, or after the read
+ *  when it doesn't (chunked). */
+export async function downloadFile(cfg: GdriveApiConfig, fileId: string): Promise<{ base64: string; bytes: number }> {
+  const p = new URLSearchParams({ alt: "media", supportsAllDrives: "true" });
+  const r = await fetch(`${API}/files/${encodeURIComponent(fileId)}?${p.toString()}`, { headers: authHeaders(cfg) });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`download failed (${r.status}): ${text.slice(0, 300)}`);
+  }
+  const overCap = (n: number) =>
+    new Error(`file is ${(n / (1024 * 1024)).toFixed(1)} MB — larger than the ${MAX_DOWNLOAD_BYTES / (1024 * 1024)} MB extraction cap`);
+  const declared = Number(r.headers.get("content-length") ?? 0);
+  if (declared > MAX_DOWNLOAD_BYTES) throw overCap(declared);
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.byteLength > MAX_DOWNLOAD_BYTES) throw overCap(buf.byteLength);
+  return { base64: buf.toString("base64"), bytes: buf.byteLength };
 }
 
 /** A shortcut's target metadata; a non-shortcut (or a broken shortcut) comes back unchanged.
