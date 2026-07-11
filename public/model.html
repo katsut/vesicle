@@ -141,7 +141,7 @@ const I18N = {
     na_desc: "This server doesn't expose GET /api/model yet. The model currently lives in the authoring wizard — propose from a schema, confirm, and apply it there.",
     open_wizard: "Open the authoring wizard",
     types_head: "Types", preds_head: "Predicates", maps_head: "Per-source mappings",
-    th_name: "predicate", th_domain: "domain", th_range: "range", th_card: "cardinality",
+    th_name: "predicate", th_domain: "domain", th_range: "range", th_card: "cardinality", th_floor: "floor", floor_hint: "Minimum access label for facts of this predicate — the type carries the policy; source sharing can only tighten it, not loosen it.",
     value_range: "value: {v}",
     entity_types_head: "Entity types", bindings_head: "Bindings",
     th_binding_pred: "predicate", th_binding_src: "source", th_binding_rest: "details",
@@ -159,7 +159,7 @@ const I18N = {
     na_desc: "このサーバーはまだ GET /api/model を公開していません。モデルは現在、作成ウィザード側にあります — スキーマから提案し、確認して適用してください。",
     open_wizard: "作成ウィザードを開く",
     types_head: "型", preds_head: "述語", maps_head: "ソース別マッピング",
-    th_name: "述語", th_domain: "domain", th_range: "range", th_card: "カーディナリティ",
+    th_name: "述語", th_domain: "domain", th_range: "range", th_card: "カーディナリティ", th_floor: "機密床", floor_hint: "この述語のファクトに付く最低アクセスラベル。方針は型が持ち、ソースの共有状態はこれを強める方向にしか働きません。",
     value_range: "値: {v}",
     entity_types_head: "エンティティ型", bindings_head: "バインディング",
     th_binding_pred: "述語", th_binding_src: "ソース", th_binding_rest: "詳細",
@@ -177,7 +177,7 @@ const I18N = {
     na_desc: "该服务器尚未提供 GET /api/model。模型目前位于创建向导中 — 在那里从模式提案、确认并应用。",
     open_wizard: "打开创建向导",
     types_head: "类型", preds_head: "谓词", maps_head: "按数据源的映射",
-    th_name: "谓词", th_domain: "domain", th_range: "range", th_card: "基数",
+    th_name: "谓词", th_domain: "domain", th_range: "range", th_card: "基数", th_floor: "保密下限", floor_hint: "该谓词的事实所获得的最低访问标签。策略由类型承载；数据源的共享状态只能收紧，不能放宽。",
     value_range: "值: {v}",
     entity_types_head: "实体类型", bindings_head: "绑定",
     th_binding_pred: "谓词", th_binding_src: "来源", th_binding_rest: "详情",
@@ -238,6 +238,15 @@ let STATE = { kind: "loading" };
 
 const name = (x) => typeof x === "string" ? x : (x && typeof x === "object" ? (x.name ?? JSON.stringify(x)) : String(x));
 
+// Sensitivity floor: the minimum access label facts of this predicate get, regardless of how the
+// source file was shared. Read-only here; tier names match the connectors' label convention.
+const FLOOR_NAMES = { 1: "internal", 2: "confidential", 3: "restricted" };
+function floorCell(p) {
+  if (p.sensitivity == null) return "—";
+  const label = FLOOR_NAMES[p.sensitivity] ?? `label ${p.sensitivity}`;
+  return `<span class="cardin" title="${esc(t("floor_hint"))}">${esc(label)}</span>`;
+}
+
 function predRow(p) {
   const range = p.range != null
     ? `<span class="etype" style="padding:2px 9px;font-size:11.5px">${esc(name(p.range))}</span>`
@@ -247,6 +256,7 @@ function predRow(p) {
     <td>${p.domain != null ? `<span class="etype" style="padding:2px 9px;font-size:11.5px">${esc(name(p.domain))}</span>` : "—"}</td>
     <td>${range}</td>
     <td><span class="cardin">${esc(p.cardinality ?? "—")}</span></td>
+    <td>${floorCell(p)}</td>
   </tr>`;
 }
 
@@ -316,7 +326,7 @@ function render() {
   html.push(`<div class="streamhead"><h2>${t("preds_head")}</h2><div class="bar"></div></div>`);
   html.push(preds.length
     ? `<div class="tablewrap"><table>
-        <thead><tr><th>${t("th_name")}</th><th>${t("th_domain")}</th><th>${t("th_range")}</th><th>${t("th_card")}</th></tr></thead>
+        <thead><tr><th>${t("th_name")}</th><th>${t("th_domain")}</th><th>${t("th_range")}</th><th>${t("th_card")}</th><th>${t("th_floor")}</th></tr></thead>
         <tbody>${preds.map(predRow).join("")}</tbody></table></div>`
     : `<div class="empty">—</div>`);
   html.push(`<div class="streamhead"><h2>${t("maps_head")}</h2><div class="bar"></div></div>`);

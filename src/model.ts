@@ -15,10 +15,21 @@ import type { PredDef, TypeDef } from "./etl/types.ts";
 import { SCHEMA as BACKLOG_SCHEMA } from "./backlog.ts";
 import { SCHEMA as GDRIVE_SCHEMA } from "./gdrive.ts";
 
+/** A shared-layer predicate: the engine declaration plus model-level policy that never goes over
+ *  the ingest wire. `sensitivity` is a FLOOR — facts/claims of this predicate get at least this
+ *  access label, whatever their source's own sharing state derived. Automatic assignment may only
+ *  RAISE a label above its source-derived tier (ratchet); lowering is always an explicit human edit.
+ *  Source ACLs say who currently CAN see a value; the floor says who SHOULD — the type carries the
+ *  policy, not the file. */
+export interface ModelPredicate extends PredDef {
+  /** minimum access label (matches the engine's numeric labels; higher = more sensitive) */
+  sensitivity?: number;
+}
+
 /** The shared type layer — ONE per deployment; every source maps onto it. */
 export interface SharedModel {
   types: TypeDef[];
-  predicates: PredDef[];
+  predicates: ModelPredicate[];
 }
 
 /** One source table/field wired onto a shared-layer predicate — the per-source half of a Predicate. */
@@ -145,6 +156,12 @@ export function bindingsOf(mapping: Mapping): SourceMapping {
   };
   if (mapping.derived?.length) sm.derived = mapping.derived;
   return sm;
+}
+
+/** The declared sensitivity floor of a predicate (undefined = no floor). Consumers combine it as
+ *  `max(source-derived label, floor)` — the ratchet direction; they never use it to lower. */
+export function sensitivityFloor(model: SharedModel, predicate: string): number | undefined {
+  return model.predicates.find((p) => p.name === predicate)?.sensitivity;
 }
 
 /** Compose (shared layer + per-source bindings) into the combined Mapping the transform consumes. */
