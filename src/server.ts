@@ -188,6 +188,17 @@ app.post("/api/webhook/backlog", async (req, res) => {
   try {
     const event = backlogSource.webhookToEvents(req.body)?.[0];
     if (!event) return res.status(400).json({ error: "not a Backlog webhook activity" });
+    // Best-effort lookups (status ids / user names in changes[]): a webhook can arrive before any
+    // connection exists, and mapping degrades gracefully without them.
+    const conn = loadConfig().sources.backlog;
+    const projectKey = (req.body as { project?: { projectKey?: string } })?.project?.projectKey;
+    if (conn && projectKey) {
+      try {
+        await backlogSource.ensureLookups(conn, projectKey);
+      } catch (e) {
+        console.log(`  backlog lookups unavailable (${projectKey}): ${(e as Error).message}`);
+      }
+    }
     const batch = backlogSource.eventToBatch(event);
     if (!batch.items.length) return res.json({ ok: true, kind: batch.kind, facts: 0, note: batch.summary });
     if (!(await sink.health())) {

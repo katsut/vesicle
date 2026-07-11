@@ -80,6 +80,31 @@ export async function listActivities(
   return (await readJson(r, "list activities")) as BacklogActivity[];
 }
 
+export interface BacklogStatus {
+  id: number;
+  name: string;
+}
+
+/** A project's status list — resolves the numeric-id strings that activity `changes[]` carry. */
+export async function listStatuses(project: string, cfg: BacklogApiConfig): Promise<BacklogStatus[]> {
+  const url = `https://${cfg.host}/api/v2/projects/${encodeURIComponent(project)}/statuses`;
+  const r = await fetch(url, { headers: authHeaders(cfg) });
+  return (await readJson(r, "list statuses")) as BacklogStatus[];
+}
+
+export interface BacklogProjectUser {
+  id: number;
+  name: string;
+  mailAddress?: string | null;
+}
+
+/** A project's members — resolves the display names that assignee `changes[]` carry back to users. */
+export async function listProjectUsers(project: string, cfg: BacklogApiConfig): Promise<BacklogProjectUser[]> {
+  const url = `https://${cfg.host}/api/v2/projects/${encodeURIComponent(project)}/users`;
+  const r = await fetch(url, { headers: authHeaders(cfg) });
+  return (await readJson(r, "list project users")) as BacklogProjectUser[];
+}
+
 export async function listWebhooks(project: string, cfg: BacklogApiConfig): Promise<BacklogWebhookRecord[]> {
   const url = `https://${cfg.host}/api/v2/projects/${encodeURIComponent(project)}/webhooks`;
   const r = await fetch(url, { headers: authHeaders(cfg) });
