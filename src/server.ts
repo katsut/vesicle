@@ -902,6 +902,31 @@ app.get("/api/model", (_req, res) => {
   res.json({ model: cfg.model, mappings: cfg.mappings });
 });
 
+// Set (or clear, with null) a predicate's sensitivity floor — the minimum access label facts/claims
+// of that predicate get, whatever their source's own sharing state derived. Automatic assignment only
+// ever RAISES a label above its source-derived tier; this endpoint is the one explicit human edit
+// that can also lower or remove a floor.
+app.post("/api/model/sensitivity", (req, res) => {
+  const name = typeof req.body?.predicate === "string" ? req.body.predicate.trim() : "";
+  const raw = req.body?.sensitivity;
+  if (!name) return res.status(400).json({ error: "missing predicate" });
+  if (raw !== null && !(Number.isInteger(raw) && raw >= 1 && raw <= 255)) {
+    return res.status(400).json({ error: "sensitivity must be an integer label (1-255) or null to clear" });
+  }
+  const cfg = loadConfig();
+  if (!cfg.model.predicates.some((p) => p.name === name)) {
+    return res.status(404).json({ error: `predicate "${name}" is not in the shared type layer` });
+  }
+  const saved = saveConfig((c) => {
+    const p = c.model.predicates.find((x) => x.name === name);
+    if (!p) return;
+    if (raw === null) delete p.sensitivity;
+    else p.sensitivity = raw;
+  });
+  console.log(`  /api/model/sensitivity → "${name}": ${raw === null ? "cleared" : raw}`);
+  res.json({ ok: true, predicate: saved.model.predicates.find((p) => p.name === name) });
+});
+
 // Confirm a proposal into the two persisted layers: append the mapping's NEW types/predicates to the
 // shared layer and save the per-source bindings under sourceId. A redefinition of an existing
 // predicate (different cardinality/domain/range) is rejected — cardinality is load-bearing in the
