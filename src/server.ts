@@ -31,7 +31,7 @@ import { planPayoff, runPayoff } from "./payoff.ts";
 import { checkDerivedPath, evaluateDerived } from "./deriveEval.ts";
 import { review, type Rule } from "./conformance.ts";
 import { recordReview, type Decision } from "./review.ts";
-import { authorizeUrl, exchangeCode } from "./backlog-oauth.ts";
+import { authorizeUrl, exchangeCode, refreshToken as refreshOAuthToken } from "./backlog-oauth.ts";
 import { StromaSink, type IngestStats } from "./etl/sink.ts";
 import { repairLateArrivals, type Repair } from "./etl/guard.ts";
 import { BacklogSource } from "./etl/source.ts";
@@ -190,11 +190,11 @@ app.post("/api/webhook/backlog", async (req, res) => {
     if (!event) return res.status(400).json({ error: "not a Backlog webhook activity" });
     // Best-effort lookups (status ids / user names in changes[]): a webhook can arrive before any
     // connection exists, and mapping degrades gracefully without them.
-    const conn = loadConfig().sources.backlog;
     const projectKey = (req.body as { project?: { projectKey?: string } })?.project?.projectKey;
-    if (conn && projectKey) {
+    if (projectKey) {
       try {
-        await backlogSource.ensureLookups(conn, projectKey);
+        const conn = await freshBacklogConn();
+        if (conn) await backlogSource.ensureLookups(conn, projectKey);
       } catch (e) {
         console.log(`  backlog lookups unavailable (${projectKey}): ${(e as Error).message}`);
       }
@@ -274,8 +274,40 @@ function oauthApp(): { clientId: string; clientSecret: string; redirectUri: stri
   if (!clientId || !clientSecret) throw new Error("set BACKLOG_CLIENT_ID and BACKLOG_CLIENT_SECRET (from the Backlog OAuth app)");
   return { clientId, clientSecret, redirectUri: `${publicUrl()}/api/backlog/oauth/callback` };
 }
-function backlogConn() {
+// The Backlog connection with a fresh access token: refreshes (and persists the ROTATED token pair —
+// Backlog invalidates the old refresh token) when the stored one is expired or about to be. `null`
+// when not connected. A refresh the provider rejects (revoked grant) disconnects, so Sources shows
+// the re-connect path; a transient failure (network) throws and the caller retries next cycle.
+async function freshBacklogConn() {
   const c = loadConfig().sources.backlog;
+  if (!c) return null;
+  if (Date.now() < c.expiresAt - 60_000) return c;
+  try {
+    const oa = oauthApp();
+    const tok = await refreshOAuthToken(c.host, { clientId: oa.clientId, clientSecret: oa.clientSecret, refreshToken: c.refreshToken });
+    const next = saveConfig((cfg) => {
+      if (cfg.sources.backlog) {
+        cfg.sources.backlog.accessToken = tok.access_token;
+        cfg.sources.backlog.refreshToken = tok.refresh_token;
+        cfg.sources.backlog.expiresAt = Date.now() + tok.expires_in * 1000;
+      }
+    });
+    console.log("  backlog OAuth token refreshed");
+    return next.sources.backlog ?? null;
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (/failed \(4\d\d\)/.test(msg)) {
+      saveConfig((cfg) => {
+        delete cfg.sources.backlog;
+      });
+      console.log(`  backlog OAuth refresh rejected — disconnected: ${msg}`);
+      return null;
+    }
+    throw e;
+  }
+}
+async function backlogConn() {
+  const c = await freshBacklogConn();
   if (!c) throw new Error("not connected to Backlog — sign in first");
   return c;
 }
@@ -328,7 +360,7 @@ app.post("/api/backlog/disconnect", (_req, res) => {
 
 app.get("/api/backlog/projects", async (_req, res) => {
   try {
-    const projects = await backlogSource.listProjects(backlogConn());
+    const projects = await backlogSource.listProjects(await backlogConn());
     res.json({ projects: projects.map((p) => ({ id: p.id, projectKey: p.projectKey, name: p.name })) });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
@@ -337,7 +369,7 @@ app.get("/api/backlog/projects", async (_req, res) => {
 
 app.post("/api/backlog/webhook", async (req, res) => {
   try {
-    const conn = backlogConn();
+    const conn = await backlogConn();
     const project = String(req.body?.project ?? "").trim();
     if (!project) return res.status(400).json({ error: "missing project" });
     const secret = process.env.BACKLOG_WEBHOOK_SECRET;
@@ -368,10 +400,11 @@ const pipelineById = (id: string): PipelineDef | undefined => loadConfig().pipel
 async function pollOnce(pipelineId: string): Promise<void> {
   const rt = pollTimers.get(pipelineId);
   const def = pipelineById(pipelineId);
-  const conn = loadConfig().sources.backlog; // the only poll-capable source today
-  if (!rt || rt.busy || !def?.scope || !conn) return;
+  if (!rt || rt.busy || !def?.scope || !loadConfig().sources.backlog) return;
   rt.busy = true;
   try {
+    const conn = await freshBacklogConn(); // the only poll-capable source today
+    if (!conn) return; // refresh rejected → disconnected; the lane idles until re-connect
     let cursor = def.cursor ?? 0;
     let facts = 0;
     const { events } = await backlogSource.poll(conn, def.scope, cursor);
