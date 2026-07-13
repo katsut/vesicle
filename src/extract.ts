@@ -12,7 +12,15 @@ import { callLLM, extractJson } from "./llm.ts";
  *  once (the unstructured analogue of the wizard's mapping), then applied to every document. */
 export interface Pattern {
   entity_types: string[];
-  predicates: Array<{ name: string; from: string; to: string; kind: "edge" | "value"; card: "one" | "many" }>;
+  predicates: Array<{
+    name: string;
+    from: string;
+    to: string;
+    kind: "edge" | "value";
+    card: "one" | "many";
+    /** this predicate's text value labels its subject node in the engine's graph views */
+    display?: boolean;
+  }>;
 }
 
 export interface ExtractedFact {

@@ -28,7 +28,9 @@ async function startServer(port: number, extraEnv: Record<string, string>): Prom
   const varDir = mkdtempSync(join(tmpdir(), "vesicle-smoke-"));
   const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(port), VESICLE_VAR_DIR: varDir, ...extraEnv },
+    // The server loads ./.env from cwd but never overrides variables that already exist, so pinning
+    // BACKLOG_WEBHOOK_SECRET empty here keeps the webhook public even when a developer's .env sets it.
+    env: { ...process.env, PORT: String(port), VESICLE_VAR_DIR: varDir, BACKLOG_WEBHOOK_SECRET: "", ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });
   children.push(child);
