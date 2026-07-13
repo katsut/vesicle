@@ -123,6 +123,7 @@
   .fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ftag{flex:none;font:600 9.5px/1 var(--mono);letter-spacing:.04em;border:1px solid var(--line-2);border-radius:100px;padding:3px 6px;color:var(--mut);background:var(--panel)}
   .ftag.draft{color:var(--clay);border-color:color-mix(in oklab,var(--clay) 40%,transparent);background:var(--clay-soft)}
+  .ftag.tri{color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
   .ftag.lbl{color:var(--sky);border-color:color-mix(in oklab,var(--sky) 34%,transparent);background:var(--sky-soft)}
   .fres{font:12px/1.6 var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .fres.ok{color:var(--good)} .fres.bad{color:var(--bad)}
@@ -227,6 +228,9 @@ const I18N = {
     gd_truncated: "Large scope — showing the first 200 files.",
     gd_draft: "draft",
     gd_read_selected: "Read selected ({m})",
+    gd_triage_btn: "✨ AI triage", gd_triage_busy: "Classifying {n} files from metadata…",
+    gd_triage_note: "Sends file names/types/dates to the AI — never document contents. Selection stays yours to confirm.",
+    gd_triage_fail: "Triage failed: {err}",
     gd_read_busy: "Reading {m} documents — one LLM call each…",
     gd_read_done: "Read {ok}/{n} documents · {facts} claims ingested",
   },
@@ -273,6 +277,9 @@ const I18N = {
     gd_truncated: "スコープが大きいため先頭 200 件のみ表示しています。",
     gd_draft: "下書き?",
     gd_read_selected: "選択した {m} 件を読み取る",
+    gd_triage_btn: "✨ AI 仕分け", gd_triage_busy: "メタデータから {n} 件を分類中…",
+    gd_triage_note: "AI に送るのはファイル名・種別・日付のみ（本文は送りません）。選択の確定はあなたの操作のままです。",
+    gd_triage_fail: "仕分けに失敗: {err}",
     gd_read_busy: "{m} 件を読み取り中 — 1 件につき LLM 1 コール…",
     gd_read_done: "{n} 件中 {ok} 件を読み取り · {facts} クレームを取り込み",
   },
@@ -319,6 +326,9 @@ const I18N = {
     gd_truncated: "范围较大 — 仅显示前 200 个文件。",
     gd_draft: "草稿",
     gd_read_selected: "读取所选（{m}）",
+    gd_triage_btn: "✨ AI 分拣", gd_triage_busy: "正在根据元数据分类 {n} 个文件…",
+    gd_triage_note: "仅向 AI 发送文件名/类型/日期——绝不发送文档内容。选择仍由你确认。",
+    gd_triage_fail: "分拣失败：{err}",
     gd_read_busy: "正在读取 {m} 个文档 — 每个文档一次 LLM 调用…",
     gd_read_done: "已读取 {ok}/{n} 个文档 · 摄取 {facts} 条声明",
   },
@@ -526,7 +536,7 @@ async function refresh() {
 // --- Google Drive card state machine: loading → error | disconnected | connected (mirrors Backlog) ---
 // funnel/sel/extract carry the body-lane curation state across re-renders (language/theme/poll ticks).
 const GD = { state: "loading", scopes: null, scopesError: null, poll: null, msg: null, error: null,
-             funnel: null, sel: new Set(), extract: null, acl: null };
+             funnel: null, sel: new Set(), extract: null, triage: null, acl: null };
 let gdPollTimer = null;
 
 function setGdStatusChip() {
@@ -702,22 +712,32 @@ function renderFunnel() {
       <div class="actions"><button class="btn ghost" id="gdLoadDocs">${t("gd_load_docs")}</button></div>`;
   } else {
     const skippedTotal = Object.values(F.skipped).reduce((a, b) => a + b, 0);
-    const items = F.files.map((f) => `
+    const triageBusy = !!(GD.triage && GD.triage.running);
+    const tri = (id) => (GD.triage && GD.triage.byId && GD.triage.byId[id]) || null;
+    const items = F.files.map((f) => {
+      const v = tri(f.id);
+      return `
       <label class="fitem">
         <input type="checkbox" data-fid="${esc(f.id)}" ${GD.sel.has(f.id) ? "checked" : ""} ${busy ? "disabled" : ""}>
         <span class="ftag">${f.mimeType === "application/pdf" ? "PDF" : "Doc"}</span>
         <span class="fname" title="${esc(f.name)}">${esc(f.name)}</span>
         ${f.draft ? `<span class="ftag draft">${t("gd_draft")}</span>` : ""}
+        ${v ? `<span class="ftag tri" title="${esc(v.reason)}">${esc(v.category)}</span>` : ""}
         <span class="ftag lbl">L${f.label}</span>
-      </label>`).join("");
+      </label>`;
+    }).join("");
     html = `
       ${F.truncated ? `<div class="hint" style="margin:0 0 6px">${t("gd_truncated")}</div>` : ""}
       ${F.files.length ? `<div class="flist">${items}</div>` : `<div class="hint" style="margin:0">${t("gd_no_readable")}</div>`}
       ${skippedTotal ? `<div class="hint" style="margin:6px 0 0">${esc(t("gd_skipped", { n: skippedTotal, kinds: skippedSummary(F.skipped) }))}</div>` : ""}
       <div class="actions">
         <button class="btn" id="gdRead" ${GD.sel.size && !busy ? "" : "disabled"}>${t("gd_read_selected", { m: GD.sel.size })}</button>
+        <button class="btn ghost" id="gdTriage" ${F.files.length && !busy && !triageBusy ? "" : "disabled"}>${t("gd_triage_btn")}</button>
         <button class="btn ghost" id="gdLoadDocs" ${busy ? "disabled" : ""}>↻ ${t("gd_load_docs")}</button>
       </div>
+      <div class="hint" style="margin:4px 0 0">${t("gd_triage_note")}</div>
+      ${triageBusy ? `<div class="pollstat"><span class="dot"></span> ${esc(t("gd_triage_busy", { n: F.files.length }))}</div>` : ""}
+      ${GD.triage && GD.triage.error ? `<div class="msg err" style="margin-top:10px">${esc(t("gd_triage_fail", { err: GD.triage.error }))}</div>` : ""}
       ${busy ? `<div class="pollstat"><span class="dot"></span> ${esc(t("gd_read_busy", { m: GD.extract.count }))}</div>` : ""}
       ${GD.extract && GD.extract.error ? `<div class="msg err" style="margin-top:10px">${esc(GD.extract.error)}</div>` : ""}
       ${GD.extract && GD.extract.results ? extractResultsHtml() : ""}`;
@@ -725,6 +745,7 @@ function renderFunnel() {
   root.innerHTML = html;
   const load = $("#gdLoadDocs"); if (load) load.onclick = loadFunnel;
   const read = $("#gdRead"); if (read) read.onclick = readSelected;
+  const triBtn = $("#gdTriage"); if (triBtn) triBtn.onclick = runTriage;
   root.querySelectorAll("input[data-fid]").forEach((cb) => {
     cb.onchange = () => {
       const id = cb.getAttribute("data-fid");
@@ -735,11 +756,30 @@ function renderFunnel() {
   });
 }
 
+// AI triage: ONE metadata-only LLM call proposes a shortlist; the human still confirms every box.
+async function runTriage() {
+  const F = GD.funnel;
+  if (!F || F.state !== "loaded" || !F.files.length) return;
+  GD.triage = { running: true };
+  renderFunnel();
+  try {
+    const r = await jf("/api/gdrive/funnel/triage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: F.scope }) });
+    const byId = {};
+    for (const v of r.files || []) byId[v.id] = v;
+    GD.triage = { byId };
+    GD.sel = new Set(F.files.filter((f) => byId[f.id] && byId[f.id].select).map((f) => f.id));
+  } catch (e) {
+    GD.triage = { error: e.message };
+  }
+  renderFunnel();
+}
+
 async function loadFunnel() {
   const scope = gdCurrentScope();
   if (!scope) { GD.funnel = { state: "error", error: t("gd_folder_invalid") }; renderFunnel(); return; }
   GD.funnel = { state: "loading" };
   GD.extract = null;
+  GD.triage = null;
   renderFunnel();
   try {
     const r = await jf("/api/gdrive/funnel?scope=" + encodeURIComponent(scope));
