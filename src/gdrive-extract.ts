@@ -3,12 +3,12 @@
 // Bodies never ride the poll — one LLM call per document is the expensive, lossy layer, so it runs
 // only as an explicitly triggered one-shot over a human-curated selection:
 //
-//   1. classifyFiles   — triage a scope listing into readable (PDF, Google Doc) vs skipped (counted
-//                        per mimeType, never silently dropped), with a filename heuristic flagging
-//                        likely drafts (pre-deselected client-side, still listed).
+//   1. classifyFiles   — triage a scope listing into readable (PDF, Google Doc, Slides, .docx) vs
+//                        skipped (counted per mimeType, never silently dropped), with a filename
+//                        heuristic flagging likely drafts (pre-deselected client-side, still listed).
 //   2. extractClaims   — apply the extraction pattern with ONE LLM call per document. PDFs go to the
 //                        model natively (no parser dependency, no conversion layer); Google Docs go
-//                        as exported plain text.
+//                        as exported plain text; .docx bodies become text locally (docx.ts).
 //   3. claimsToBatch   — deterministic mapping to a self-contained ingest batch: pattern defs +
 //                        entity nodes in the extracted-entity band + facts with explicit
 //                        `drive:<fileId>` provenance on every fact.
@@ -31,7 +31,7 @@
 import type { BatchItem, FactObject } from "./etl/types.ts";
 import type { Pattern } from "./extract.ts";
 import { isoToEpoch } from "./backlog.ts";
-import { DOC_MIME, PDF_MIME, SLIDES_MIME, type DriveFile } from "./gdrive-api.ts";
+import { DOC_MIME, PDF_MIME, SLIDES_MIME, WORD_MIME, type DriveFile } from "./gdrive-api.ts";
 import { hash48, nid, sensitivityLabel } from "./gdrive.ts";
 import { callLLM, extractJson } from "./llm.ts";
 import { sensitivityFloor, type SharedModel } from "./model.ts";
@@ -75,14 +75,14 @@ export interface FunnelFile {
 /** Filenames that usually mean "not the document of record" (incl. localized markers). */
 export const DRAFT_RE = /draft|下書き|案|copy|コピー|old|_v\d+|backup/i;
 
-/** Triage hydrated files: PDFs, Google Docs and Slides are readable; everything else is counted
- *  per mimeType — skipped files are summarized, never silently dropped. */
+/** Triage hydrated files: PDFs, Google Docs, Slides and Word (.docx) are readable; everything else
+ *  is counted per mimeType — skipped files are summarized, never silently dropped. */
 export function classifyFiles(files: DriveFile[]): { files: FunnelFile[]; skipped: Record<string, number> } {
   const readable: FunnelFile[] = [];
   const skipped: Record<string, number> = {};
   for (const f of files) {
     const mime = f.mimeType ?? "unknown";
-    if (mime === PDF_MIME || mime === DOC_MIME || mime === SLIDES_MIME) {
+    if (mime === PDF_MIME || mime === DOC_MIME || mime === SLIDES_MIME || mime === WORD_MIME) {
       const name = f.name ?? f.id;
       readable.push({
         id: f.id,

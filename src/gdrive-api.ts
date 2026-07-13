@@ -71,6 +71,7 @@ export const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
 export const DOC_MIME = "application/vnd.google-apps.document";
 export const SLIDES_MIME = "application/vnd.google-apps.presentation";
 export const PDF_MIME = "application/pdf";
+export const WORD_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const API = "https://www.googleapis.com/drive/v3";
 const FILE_FIELDS =
