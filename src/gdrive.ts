@@ -70,6 +70,7 @@ export const SCHEMA: BatchItem[] = [
   { pred_def: { name: "parent-folder", cardinality: "one", domain: "Folder", range: "Folder" } },
   { pred_def: { name: "owned-by", cardinality: "one", domain: "Document", range: "Person" } },
   { pred_def: { name: "can-access", cardinality: "many", domain: "Document", range: "Person" } },
+  { pred_def: { name: "account-deleted", cardinality: "one", domain: "Person", range_value: "bool" } },
 ];
 
 // --- ACL → sensitivity label ----------------------------------------------------------------------
@@ -86,10 +87,13 @@ export const LABEL_RESTRICTED = 3;
 
 export function sensitivityLabel(permissions: DrivePermission[] | undefined): number {
   if (!permissions) return LABEL_RESTRICTED; // ACL unknown (fetch failed) → strictest
-  if (permissions.some((p) => p.type === "domain" || p.type === "anyone")) return LABEL_INTERNAL;
-  if (permissions.some((p) => p.type === "group")) return LABEL_CONFIDENTIAL;
+  // The tier reflects EFFECTIVE sharing: a grant held by a deleted account cannot be exercised, so
+  // it does not widen the tier (the grant itself stays in the graph as an audit edge).
+  const live = permissions.filter((p) => !p.deleted);
+  if (live.some((p) => p.type === "domain" || p.type === "anyone")) return LABEL_INTERNAL;
+  if (live.some((p) => p.type === "group")) return LABEL_CONFIDENTIAL;
   const nonOwner = new Set(
-    permissions.filter((p) => p.role !== "owner").map((p) => p.id ?? p.emailAddress).filter((k): k is string => !!k),
+    live.filter((p) => p.role !== "owner").map((p) => p.id ?? p.emailAddress).filter((k): k is string => !!k),
   );
   return nonOwner.size > 1 ? LABEL_CONFIDENTIAL : LABEL_RESTRICTED;
 }
@@ -174,6 +178,12 @@ export function driveFileToBatch(file: DriveFile): GdriveBatch {
     if (perm.type !== "user") continue;
     const pid = person(perm);
     if (pid == null) continue;
+    // A deleted grantee stays in the graph (the ACL still carries the grant — a hygiene finding),
+    // labeled the way Drive's own UI shows it; the API returns no identity for it.
+    if (perm.deleted) {
+      fact(pid, "name", { text: "(deleted account)" });
+      fact(pid, "account-deleted", { bool: true });
+    }
     fact(doc, "can-access", { node: pid });
     grants++;
   }

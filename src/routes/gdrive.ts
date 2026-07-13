@@ -260,11 +260,14 @@ gdriveRouter.post("/api/gdrive/poll/start", (req, res) => {
     }
     const scopeStr = scope.kind === "my-drive" ? "my-drive" : `${scope.kind}:${scope.id}`;
     // Upsert the lane. Same scope keeps the cursor token (a restart resumes the changes stream);
-    // a new scope re-runs the initial listing. The id "gdrive" doubles as the provenance value.
+    // a new scope — or `resync: true` — re-runs the initial listing (node ids and facts are
+    // idempotent, so a resync backfills mapping improvements onto an already-ingested scope).
+    // The id "gdrive" doubles as the provenance value.
+    const resync = req.body?.resync === true;
     saveConfig((cfg) => {
       const def = cfg.pipelines.find((p) => p.id === GDRIVE_ID);
       if (def) {
-        if (def.scope !== scopeStr) {
+        if (def.scope !== scopeStr || resync) {
           def.scope = scopeStr;
           delete def.cursorToken;
           def.ingested = 0;
