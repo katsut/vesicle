@@ -59,12 +59,14 @@ export const SCHEMA: BatchItem[] = [
   { type_def: { name: "Document" } },
   { type_def: { name: "Folder" } },
   { type_def: { name: "Person" } },
-  { pred_def: { name: "name", cardinality: "one", domain: "Person", range_value: "text" } },
+  // `name` must carry the same display flag as the Backlog schema — the engine keeps the flag from
+  // whichever def line arrived last, so connectors sharing a predicate must agree on it.
+  { pred_def: { name: "name", cardinality: "one", domain: "Person", range_value: "text", display: true } },
   { pred_def: { name: "email", cardinality: "one", domain: "Person", range_value: "text" } },
-  { pred_def: { name: "doc-name", cardinality: "one", domain: "Document", range_value: "text" } },
+  { pred_def: { name: "doc-name", cardinality: "one", domain: "Document", range_value: "text", display: true } },
   { pred_def: { name: "mime-type", cardinality: "one", domain: "Document", range_value: "text" } },
   { pred_def: { name: "in-folder", cardinality: "one", domain: "Document", range: "Folder" } },
-  { pred_def: { name: "folder-name", cardinality: "one", domain: "Folder", range_value: "text" } },
+  { pred_def: { name: "folder-name", cardinality: "one", domain: "Folder", range_value: "text", display: true } },
   { pred_def: { name: "parent-folder", cardinality: "one", domain: "Folder", range: "Folder" } },
   { pred_def: { name: "owned-by", cardinality: "one", domain: "Document", range: "Person" } },
   { pred_def: { name: "can-access", cardinality: "many", domain: "Document", range: "Person" } },

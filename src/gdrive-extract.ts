@@ -50,7 +50,7 @@ export interface DocPattern extends Pattern {
 export const DEFAULT_PATTERN: DocPattern = {
   entity_types: ["Rule", "Section"],
   predicates: [
-    { name: "rule-title", from: "Rule", to: "text", kind: "value", card: "one" },
+    { name: "rule-title", from: "Rule", to: "text", kind: "value", card: "one", display: true },
     { name: "rule-text", from: "Rule", to: "text", kind: "value", card: "one" },
     { name: "applies-to", from: "Rule", to: "text", kind: "value", card: "one" },
     { name: "in-section", from: "Rule", to: "Section", kind: "edge", card: "one" },

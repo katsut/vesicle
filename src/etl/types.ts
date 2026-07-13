@@ -21,6 +21,8 @@ export interface PredDef {
   range?: string;
   /** value-valued range, e.g. "text" */
   range_value?: string;
+  /** this predicate's text value labels its subject node in the engine's graph views */
+  display?: boolean;
 }
 
 /** A named conformance rule, declared once and evaluated by name. */
