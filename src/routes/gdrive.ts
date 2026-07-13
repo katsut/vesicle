@@ -8,6 +8,7 @@ import { DOC_MIME, PDF_MIME, SLIDES_MIME, downloadFile, exportDoc, exportPdf, ge
 import { driveFileToBatch, sensitivityLabel } from "../gdrive.ts";
 import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, entityNamesOf, extractClaims, type DocContent, type DocPattern } from "../gdrive-extract.ts";
 import { evaluateSharing, recordSharingReview, type SharingDecision } from "../access-conformance.ts";
+import { callLLM, extractJson } from "../llm.ts";
 import { Stroma } from "../stroma.ts";
 import { repairLateArrivals } from "../etl/guard.ts";
 import { loadConfig, recordRun, saveConfig, type PipelineDef } from "../etl/store.ts";
@@ -391,6 +392,58 @@ gdriveRouter.get("/api/gdrive/funnel", async (req, res) => {
     for (const f of listed) hydrated.push(await hydrateFile(cfg, f));
     const { files, skipped } = classifyFiles(hydrated);
     res.json({ files, skipped, total: listed.length, truncated });
+  } catch (e) {
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+// AI triage over the funnel's METADATA (names, types, dates — never content): ONE LLM call
+// classifies the readable set and proposes a shortlist. Explicitly user-triggered — sending file
+// names to the LLM is itself a consent act — and only a proposal: the human's checkbox confirmation
+// stays the gate that releases document bodies to extraction.
+gdriveRouter.post("/api/gdrive/funnel/triage", async (req, res) => {
+  try {
+    const conn = await gdriveConn();
+    const scope = parseBodyScope(req.body?.scope);
+    if (!scope) return res.status(400).json({ error: "missing or invalid scope (my-drive | folder:<id-or-url> | drive:<id>)" });
+    const intent =
+      typeof req.body?.intent === "string" && req.body.intent.trim()
+        ? req.body.intent.trim()
+        : "documents that declare rules, policies, or decision authority (regulations, policy decks, authority matrices)";
+    const cfg: GdriveApiConfig = { token: conn.accessToken };
+    const listed: DriveFile[] = [];
+    let pageToken: string | undefined;
+    do {
+      const page = await listFiles(cfg, { scope, pageToken });
+      listed.push(...page.files);
+      pageToken = page.nextPageToken;
+      if (listed.length >= FUNNEL_CAP) { listed.length = FUNNEL_CAP; break; }
+    } while (pageToken);
+    const hydrated: DriveFile[] = [];
+    for (const f of listed) hydrated.push(await hydrateFile(cfg, f));
+    const { files } = classifyFiles(hydrated);
+    if (!files.length) return res.json({ files: [] });
+    const meta = files.map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, modifiedTime: f.modifiedTime, draft: f.draft }));
+    const prompt = `You triage a file listing for a document-extraction pipeline. Using ONLY the metadata below
+(you cannot see file contents), classify each file and decide whether it belongs on the shortlist.
+
+LOOKING FOR: ${intent}
+
+Rules:
+- "category": one short kebab-case label of what the file appears to be (e.g. "policy", "meeting-minutes", "report", "draft", "training", "other").
+- "select": true only when the file plausibly matches LOOKING FOR and is not a draft/superseded copy.
+- "reason": one short sentence naming the metadata cue (title wording, date, draft marker).
+- Answer for EVERY file, same order. Output ONLY JSON: {"files":[{"id":"...","category":"...","select":true,"reason":"..."}]}
+
+FILES:
+${JSON.stringify(meta, null, 1)}`;
+    const text = await callLLM(prompt, { timeoutMs: 120_000, maxTokens: 4096 });
+    const parsed = extractJson(text) as { files?: Array<{ id?: string; category?: string; select?: boolean; reason?: string }> };
+    const known = new Set(files.map((f) => f.id));
+    const out = (parsed.files ?? [])
+      .filter((r) => typeof r.id === "string" && known.has(r.id))
+      .map((r) => ({ id: r.id, category: r.category ?? "other", select: r.select === true, reason: r.reason ?? "" }));
+    res.json({ files: out });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
   }
