@@ -29,6 +29,8 @@ export interface DrivePermission {
   displayName?: string;
   domain?: string;
   allowFileDiscovery?: boolean;
+  /** the grantee account has been deleted — the grant remains in the ACL but cannot be exercised */
+  deleted?: boolean;
 }
 
 export interface DriveUser {
@@ -71,7 +73,7 @@ export const PDF_MIME = "application/pdf";
 
 const API = "https://www.googleapis.com/drive/v3";
 const FILE_FIELDS =
-  "id,name,mimeType,trashed,modifiedTime,createdTime,owners(emailAddress,displayName,permissionId),parents,shortcutDetails,permissions(id,type,role,emailAddress,displayName,domain,allowFileDiscovery)";
+  "id,name,mimeType,trashed,modifiedTime,createdTime,owners(emailAddress,displayName,permissionId),parents,shortcutDetails,permissions(id,type,role,emailAddress,displayName,domain,allowFileDiscovery,deleted)";
 
 function authHeaders(cfg: GdriveApiConfig): Record<string, string> {
   return { authorization: `Bearer ${cfg.token}` };
@@ -140,7 +142,7 @@ export async function fetchPermissions(cfg: GdriveApiConfig, fileId: string): Pr
   do {
     const p = new URLSearchParams({
       pageSize: "100",
-      fields: "nextPageToken,permissions(id,type,role,emailAddress,displayName,domain,allowFileDiscovery)",
+      fields: "nextPageToken,permissions(id,type,role,emailAddress,displayName,domain,allowFileDiscovery,deleted)",
       supportsAllDrives: "true",
     });
     if (pageToken) p.set("pageToken", pageToken);
