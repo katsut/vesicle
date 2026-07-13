@@ -408,6 +408,11 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
     }
     const pattern = parseDocPattern(req.body?.pattern);
     if ("error" in pattern) return res.status(400).json({ error: pattern.error });
+    // optional shared claim-identity key: extracting revisions of ONE policy together (or in
+    // sequence) with the same logicalDocId lands the same provisions on the same nodes, so
+    // effective-date supersession builds the revision timeline
+    const logicalDocId = req.body?.logicalDocId != null ? String(req.body.logicalDocId).trim() : undefined;
+    if (logicalDocId === "") return res.status(400).json({ error: "logicalDocId must be a non-empty string when present" });
     if (!(await sink.health())) {
       return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
     }
@@ -430,6 +435,7 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
         const claims = await extractClaims(pattern, doc);
         const batch = claimsToBatch({
           fileId: file.id,
+          logicalDocId,
           docLabel: sensitivityLabel(file.permissions),
           modifiedTime: file.modifiedTime,
           pattern,

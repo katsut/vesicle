@@ -197,10 +197,12 @@ export async function extractClaims(pattern: DocPattern, doc: DocContent): Promi
 /** The extracted-entity band: one above gdrive.ts's Document/Folder/Person bands. */
 export const CLAIM_BAND = 8 * 2 ** 48;
 
-/** Deterministic extracted-entity id: hash48 of "<docFileId>|<entityType>|<entityName>" in the
- *  claim band — per-document idempotent, never colliding across bands. */
-export const claimNid = (docFileId: string, entityType: string, entityName: string): number =>
-  CLAIM_BAND + hash48(`${docFileId}|${entityType}|${entityName}`);
+/** Deterministic extracted-entity id: hash48 of "<docKey>|<entityType>|<entityName>" in the claim
+ *  band — idempotent per LOGICAL document, never colliding across bands. The key defaults to the
+ *  file id; revisions of the same policy pass a shared logical id so the same provision extracted
+ *  from two revisions lands on ONE node and effective-date supersession builds a timeline. */
+export const claimNid = (docKey: string, entityType: string, entityName: string): number =>
+  CLAIM_BAND + hash48(`${docKey}|${entityType}|${entityName}`);
 
 export interface ClaimBatch {
   items: BatchItem[];
@@ -215,6 +217,8 @@ export interface ClaimBatch {
  *  unset sources, and these must trace to the document, not the lane. */
 export function claimsToBatch(input: {
   fileId: string;
+  /** claim-identity key shared by revisions of the same policy — defaults to fileId */
+  logicalDocId?: string;
   /** the source document's ACL-derived sensitivity tier */
   docLabel: number;
   /** the valid_from fallback for claims without an effective date */
@@ -224,6 +228,8 @@ export function claimsToBatch(input: {
   model: SharedModel;
 }): ClaimBatch {
   const { fileId, docLabel, pattern, claims, model } = input;
+  // provenance stays the ACTUAL file (which revision said it); only claim identity uses the logical key
+  const docKey = input.logicalDocId ?? fileId;
   const source = `drive:${fileId}`;
   const docEpoch = isoToEpoch(input.modifiedTime ?? "");
 
@@ -234,8 +240,8 @@ export function claimsToBatch(input: {
       (p): BatchItem => ({
         pred_def:
           p.kind === "value"
-            ? { name: p.name, cardinality: p.card, domain: p.from, range_value: "text" }
-            : { name: p.name, cardinality: p.card, domain: p.from, range: p.to },
+            ? { name: p.name, cardinality: p.card, domain: p.from, range_value: "text", display: p.display }
+            : { name: p.name, cardinality: p.card, domain: p.from, range: p.to, display: p.display },
       }),
     ),
   ];
@@ -248,7 +254,7 @@ export function claimsToBatch(input: {
 
   const entity = (type: string, name: string, label: number): number | null => {
     if (!types.has(type)) return null; // a type outside the pattern never mints a node
-    const id = claimNid(fileId, type, name);
+    const id = claimNid(docKey, type, name);
     nodeType.set(id, type);
     nodeLabel.set(id, Math.max(nodeLabel.get(id) ?? 0, label));
     return id;
