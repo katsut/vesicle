@@ -200,3 +200,24 @@ test("buildDocPrompt: PDF references the attachment, text embeds the document, d
   assert.ok(txt.includes("Rule 1 applies to everyone."));
   assert.ok(!txt.includes("attached PDF"));
 });
+
+test("claimsToBatch: a shared logicalDocId lands the same provision from two revisions on one node", () => {
+  const claims: DocClaim[] = [
+    { subject: "Rule 4.2", subjectType: "Rule", predicate: "rule-title", object: "Expenses" },
+  ];
+  const common = { docLabel: 1, pattern: PATTERN, model: modelWithFloors({}) };
+  const v1 = claimsToBatch({ fileId: "file-v1", logicalDocId: "policy-x", claims, ...common });
+  const v2 = claimsToBatch({ fileId: "file-v2", logicalDocId: "policy-x", claims, ...common });
+  const id1 = nodesOf(v1.items)[0]!.id;
+  const id2 = nodesOf(v2.items)[0]!.id;
+  assert.equal(id1, id2); // same logical document ⇒ same claim node ⇒ valid_from supersession connects revisions
+  assert.equal(id1, claimNid("policy-x", "Rule", "Rule 4.2"));
+  // provenance stays the ACTUAL revision file
+  const srcOf = (items: typeof v1.items) =>
+    items.flatMap((i) => ("fact" in i ? [i.fact.source] : []))[0];
+  assert.equal(srcOf(v1.items), "drive:file-v1");
+  assert.equal(srcOf(v2.items), "drive:file-v2");
+  // and without logicalDocId the key falls back to the fileId (unchanged behavior)
+  const solo = claimsToBatch({ fileId: "file-v1", claims, ...common });
+  assert.equal(nodesOf(solo.items)[0]!.id, claimNid("file-v1", "Rule", "Rule 4.2"));
+});
