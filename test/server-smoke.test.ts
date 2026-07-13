@@ -69,8 +69,7 @@ test("status endpoints answer with JSON on an empty var dir (auth disabled)", as
 
   const poll = await fetch(`${base}/api/backlog/poll/status`);
   assert.equal(poll.status, 200);
-  const pollBody = (await poll.json()) as { running: boolean };
-  assert.equal(pollBody.running, false);
+  assert.deepEqual(await poll.json(), { lanes: [] });
 
   const pipelines = await fetch(`${base}/api/pipelines`);
   assert.equal(pipelines.status, 200);

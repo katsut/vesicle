@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { seedModel, type SharedModel, type SourceMapping } from "../model.ts";
 
-/** The saved Backlog connection: the OAuth grant plus the last project picked for streaming. */
+/** The saved Backlog connection: the OAuth grant for the space (projects live on the poll lanes). */
 export interface BacklogConnection {
   /** the space host, e.g. example.backlog.com */
   host: string;
@@ -17,8 +17,6 @@ export interface BacklogConnection {
   refreshToken: string;
   /** unix-ms expiry of the access token */
   expiresAt: number;
-  projectId?: number;
-  projectKey?: string;
 }
 
 /** The saved Google Drive connection: the OAuth grant plus the last scope picked for streaming.
@@ -34,8 +32,9 @@ export interface GdriveConnection {
 }
 
 /** One persisted ingestion lane: a single source wired into the sink, with lifecycle and counters.
- *  The pipeline id doubles as the provenance value the sink stamps on facts (see StromaSink.ingest),
- *  so the default Backlog poll lane uses id "backlog" — the wire value the graph already contains. */
+ *  The pipeline id doubles as the provenance value the sink stamps on facts (see StromaSink.ingest).
+ *  Backlog poll lanes use id "backlog:<PROJECTKEY>", one per project; the lane that predates that
+ *  scheme keeps its legacy id "backlog" — the wire value the graph already contains. */
 export interface PipelineDef {
   id: string;
   name: string;
@@ -46,7 +45,7 @@ export interface PipelineDef {
   scope?: string;
   /** lifecycle: a running poll lane is resumed on boot; a paused one is not */
   state: "running" | "paused";
-  /** last seen upstream event id (poll mode, numeric cursors — Backlog); reset when the scope changes */
+  /** last seen upstream event id (poll mode, numeric cursors — Backlog) */
   cursor?: number;
   /** opaque string cursor (poll mode, token cursors — the Drive Changes page token); absent until the
    *  lane's initial full listing completes, reset when the scope changes */

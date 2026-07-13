@@ -100,6 +100,13 @@
   .pollstat{margin-top:12px;font:12.5px/1.5 var(--mono);color:var(--accent-2);display:flex;align-items:center;gap:8px}
   .pollstat .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.4s ease-in-out infinite;flex:none}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  /* Backlog poll-lane list (one row per project) */
+  .lanes{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  .lane{font:12.5px/1.5 var(--mono);color:var(--accent-2);display:flex;align-items:center;gap:8px}
+  .lane.stopped{color:var(--mut)}
+  .lane .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.4s ease-in-out infinite;flex:none}
+  .lane .line{flex:1;min-width:0;overflow-wrap:anywhere}
+  .lane .btn{flex:none;padding:4px 10px;font-size:12px}
   .msg{margin-top:12px;font:12.5px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word;padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--line)}
   .msg.ok{color:var(--good);background:color-mix(in oklab,var(--accent) 8%,transparent);border-color:color-mix(in oklab,var(--accent) 30%,transparent)}
   .msg.err{color:var(--bad);background:color-mix(in oklab,var(--bad) 8%,transparent);border-color:color-mix(in oklab,var(--bad) 30%,transparent)}
@@ -119,7 +126,7 @@
   .ftag.lbl{color:var(--sky);border-color:color-mix(in oklab,var(--sky) 34%,transparent);background:var(--sky-soft)}
   .fres{font:12px/1.6 var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .fres.ok{color:var(--good)} .fres.bad{color:var(--bad)}
-  @media (prefers-reduced-motion:reduce){*{transition:none!important}.pollstat .dot{animation:none}}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}.pollstat .dot,.lane .dot{animation:none}}
 </style>
 </head>
 <body>
@@ -190,9 +197,10 @@ const I18N = {
     connected_to: "Connected to", disconnect: "disconnect",
     mode_hint: "<b>Poll</b> streams issue events over OAuth with no public URL — recommended. <b>Webhook</b> is push and needs a public URL Backlog can reach.",
     project_label: "Project", no_projects: "(no projects)",
-    start_poll: "Start streaming (poll)", stop_poll: "Stop", install_webhook: "Install webhook",
+    start_poll: "Start streaming (poll)", stop_poll: "Stop", resume_poll: "Resume", install_webhook: "Install webhook",
     webhook_needs: "needs a public URL Backlog can reach",
     streaming_line: "streaming {project} · {n} facts ingested",
+    stopped_line: "{project} stopped · {n} facts ingested",
     msg_started: "Streaming {project} — polling Backlog over OAuth every few seconds (no public URL needed).",
     msg_stopped: "Stopped streaming.",
     msg_webhook: "Webhook #{id} installed on {project}.\nDelivering to {url}",
@@ -235,9 +243,10 @@ const I18N = {
     connected_to: "接続先:", disconnect: "切断",
     mode_hint: "<b>ポーリング</b>は公開 URL なしで OAuth 経由でイベントを取得します — 推奨。<b>Webhook</b> はプッシュ型で、Backlog から到達できる公開 URL が必要です。",
     project_label: "プロジェクト", no_projects: "（プロジェクトなし）",
-    start_poll: "ストリーミング開始（ポーリング）", stop_poll: "停止", install_webhook: "Webhook を設置",
+    start_poll: "ストリーミング開始（ポーリング）", stop_poll: "停止", resume_poll: "再開", install_webhook: "Webhook を設置",
     webhook_needs: "Backlog から到達できる公開 URL が必要です",
     streaming_line: "{project} をストリーミング中 · {n} facts 取り込み済み",
+    stopped_line: "{project} は停止中 · {n} facts 取り込み済み",
     msg_started: "{project} のストリーミングを開始 — 数秒ごとに OAuth 経由で Backlog をポーリングします（公開 URL 不要）。",
     msg_stopped: "ストリーミングを停止しました。",
     msg_webhook: "Webhook #{id} を {project} に設置しました。\n配信先: {url}",
@@ -280,9 +289,10 @@ const I18N = {
     connected_to: "已连接到", disconnect: "断开连接",
     mode_hint: "<b>轮询</b>通过 OAuth 拉取事件，无需公开 URL — 推荐。<b>Webhook</b> 为推送方式，需要 Backlog 能访问的公开 URL。",
     project_label: "项目", no_projects: "（无项目）",
-    start_poll: "开始流式（轮询）", stop_poll: "停止", install_webhook: "安装 Webhook",
+    start_poll: "开始流式（轮询）", stop_poll: "停止", resume_poll: "恢复", install_webhook: "安装 Webhook",
     webhook_needs: "需要 Backlog 能访问的公开 URL",
     streaming_line: "正在流式 {project} · 已摄取 {n} 条事实",
+    stopped_line: "{project} 已停止 · 已摄取 {n} 条事实",
     msg_started: "已开始流式 {project} — 每隔几秒通过 OAuth 轮询 Backlog（无需公开 URL）。",
     msg_stopped: "已停止流式。",
     msg_webhook: "已在 {project} 上安装 Webhook #{id}。\n投递至 {url}",
@@ -371,7 +381,8 @@ async function refreshStatus() {
 }
 
 // --- Backlog card state machine: loading → error | disconnected | connected ---
-const BL = { state: "loading", host: null, projects: null, projectsError: null, poll: null, msg: null, error: null };
+// lanes mirrors /api/backlog/poll/status — one poll lane per project.
+const BL = { state: "loading", host: null, projects: null, projectsError: null, lanes: [], msg: null, error: null };
 let pollTimer = null;
 
 function setStatusChip() {
@@ -412,7 +423,6 @@ function renderBacklog() {
   const projOpts = (BL.projects ?? []).map((p) =>
     `<option value="${esc(p.projectKey)}">${esc(p.name)} (${esc(p.projectKey)})</option>`).join("")
     || `<option>${t("no_projects")}</option>`;
-  const running = !!BL.poll?.running;
   root.innerHTML = `
     <div class="conn"><span class="dot"></span> ${t("connected_to")} <b>${esc(BL.host)}</b> · <a href="#" id="disconnect">${t("disconnect")}</a></div>
     <p class="hint">${t("mode_hint")}</p>
@@ -420,22 +430,18 @@ function renderBacklog() {
     <select id="project">${projOpts}</select>
     <div class="actions">
       <button class="btn" id="startPoll">${t("start_poll")}</button>
-      <button class="btn ghost" id="stopPoll" ${running ? "" : "hidden"}>${t("stop_poll")}</button>
       <button class="btn ghost" id="install" title="${esc(t("webhook_needs"))}">${t("install_webhook")}</button>
     </div>
-    <div class="pollstat" id="pollstat" ${running ? "" : "hidden"}></div>
+    ${BL.lanes.length ? `<div class="lanes">${BL.lanes.map(laneRow).join("")}</div>` : ""}
     <div id="msg"></div>`;
   if (BL.projectsError) show("err", BL.projectsError);
-  if (running) {
-    if (BL.poll.project) $("#project").value = BL.poll.project;
-    $("#pollstat").innerHTML = `<span class="dot"></span> ${esc(t("streaming_line", { project: BL.poll.project ?? "?", n: BL.poll.ingested ?? 0 }))}${BL.poll.error ? ` · <span style="color:var(--bad)">${esc(BL.poll.error)}</span>` : ""}`;
-  }
   if (BL.msg) show(BL.msg.kind, BL.msg.text);
   $("#disconnect").onclick = async (e) => {
     e.preventDefault();
     try { await jf("/api/backlog/disconnect", { method: "POST" }); BL.msg = null; await refresh(); }
     catch (err) { show("err", err.message); }
   };
+  // Start adds the lane for the selected project — or resumes it if it already exists.
   $("#startPoll").onclick = async () => {
     const project = $("#project").value; if (!project) return;
     $("#startPoll").disabled = true;
@@ -443,13 +449,24 @@ function renderBacklog() {
       await jf("/api/backlog/poll/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project }) });
       BL.msg = { kind: "ok", text: t("msg_started", { project }) };
       await pollStatus();
+      renderBacklog();
     } catch (e) { show("err", e.message); }
     finally { const b = $("#startPoll"); if (b) b.disabled = false; }
   };
-  $("#stopPoll").onclick = async () => {
-    try { await jf("/api/backlog/poll/stop", { method: "POST" }); BL.msg = { kind: "ok", text: t("msg_stopped") }; await pollStatus(); }
-    catch (e) { show("err", e.message); }
-  };
+  // per-lane stop / resume
+  root.querySelectorAll("button[data-act]").forEach((b) => {
+    b.onclick = async () => {
+      const project = b.getAttribute("data-project");
+      const resume = b.getAttribute("data-act") === "start";
+      b.disabled = true;
+      try {
+        await jf(`/api/backlog/poll/${resume ? "start" : "stop"}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project }) });
+        BL.msg = { kind: "ok", text: resume ? t("msg_started", { project }) : t("msg_stopped") };
+        await pollStatus();
+        renderBacklog();
+      } catch (e) { show("err", e.message); }
+    };
+  });
   $("#install").onclick = async () => {
     const project = $("#project").value; if (!project) return;
     $("#install").disabled = true;
@@ -463,16 +480,30 @@ function renderBacklog() {
 }
 function show(kind, text) { const m = $("#msg"); if (m) { m.className = "msg " + kind; m.textContent = text; } }
 
+// One row per poll lane: the streaming/stopped line plus a stop or resume button.
+function laneLine(l) {
+  const err = l.error ? ` · <span style="color:var(--bad)">${esc(l.error)}</span>` : "";
+  return esc(t(l.running ? "streaming_line" : "stopped_line", { project: l.project ?? "?", n: l.ingested ?? 0 })) + err;
+}
+function laneRow(l) {
+  return `<div class="lane${l.running ? "" : " stopped"}" data-lane="${esc(l.project ?? "")}">
+      ${l.running ? `<span class="dot"></span>` : ""}<span class="line">${laneLine(l)}</span>
+      <button class="btn ghost" data-act="${l.running ? "stop" : "start"}" data-project="${esc(l.project ?? "")}">${t(l.running ? "stop_poll" : "resume_poll")}</button>
+    </div>`;
+}
+// Re-render only when the lane set or a lifecycle bit changes; counters refresh in place.
+const laneSig = (lanes) => (lanes ?? []).map((l) => `${l.project}:${l.running}:${l.state}`).join("|");
+
 async function pollStatus() {
   try {
-    const prev = BL.poll?.running;
-    BL.poll = await jf("/api/backlog/poll/status");
-    if (BL.poll.running) { if (!pollTimer) pollTimer = setInterval(pollStatus, 4000); }
+    const prev = laneSig(BL.lanes);
+    BL.lanes = (await jf("/api/backlog/poll/status")).lanes ?? [];
+    if (BL.lanes.some((l) => l.running)) { if (!pollTimer) pollTimer = setInterval(pollStatus, 4000); }
     else if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    if (BL.poll.running !== prev) renderBacklog();
-    else if (BL.poll.running) { // refresh the counter line in place
-      const ps = $("#pollstat");
-      if (ps) { ps.hidden = false; ps.innerHTML = `<span class="dot"></span> ${esc(t("streaming_line", { project: BL.poll.project ?? "?", n: BL.poll.ingested ?? 0 }))}${BL.poll.error ? ` · <span style="color:var(--bad)">${esc(BL.poll.error)}</span>` : ""}`; }
+    if (laneSig(BL.lanes) !== prev) renderBacklog();
+    else for (const l of BL.lanes) { // refresh the counter lines in place
+      const el = document.querySelector(`.lane[data-lane="${l.project}"] .line`);
+      if (el) el.innerHTML = laneLine(l);
     }
   } catch { /* transient poll-status failure: keep the last known state */ }
 }

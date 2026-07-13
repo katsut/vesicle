@@ -166,9 +166,6 @@ backlogRouter.post("/api/backlog/webhook", async (req, res) => {
     const secret = process.env.BACKLOG_WEBHOOK_SECRET;
     const hookUrl = `${publicUrl()}/api/webhook/backlog${secret ? `?secret=${encodeURIComponent(secret)}` : ""}`;
     const hook = await backlogSource.installWebhook(conn, { project, hookUrl });
-    saveConfig((c) => {
-      if (c.sources.backlog) c.sources.backlog.projectKey = project;
-    });
     res.json({ ok: true, id: hook.id, hookUrl: hook.hookUrl, activityTypeIds: hook.activityTypeIds });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
@@ -230,22 +227,20 @@ backlogRouter.post("/api/backlog/poll/start", (req, res) => {
     if (!loadConfig().sources.backlog) return res.status(400).json({ error: "not connected to Backlog" });
     const project = String(req.body?.project ?? "").trim();
     if (!project) return res.status(400).json({ error: "missing project" });
-    // Upsert the lane. Same scope keeps the cursor (a restart resumes the stream); a new scope
-    // rewinds to 0. The id "backlog" doubles as the provenance value the sink stamps on facts.
+    // One lane per project, upserted by (source, scope): a matched lane resumes with its cursor,
+    // other lanes are never touched, and a lane's scope never changes after creation. The lane id
+    // doubles as the provenance value the sink stamps on facts, so the lane that predates the
+    // multi-lane scheme keeps its legacy id "backlog" — the wire value the graph already contains.
+    let laneId = `${backlogSource.id}:${project}`;
     saveConfig((cfg) => {
-      const def = cfg.pipelines.find((p) => p.id === backlogSource.id);
+      const def = cfg.pipelines.find((p) => p.source === backlogSource.id && p.scope === project);
       if (def) {
-        if (def.scope !== project) {
-          def.scope = project;
-          def.cursor = 0;
-          def.ingested = 0;
-        }
-        def.name = `${backlogSource.label} · ${project}`;
+        laneId = def.id;
         def.state = "running";
         def.lastError = null;
       } else {
         cfg.pipelines.push({
-          id: backlogSource.id,
+          id: laneId,
           name: `${backlogSource.label} · ${project}`,
           source: backlogSource.id,
           mode: "poll",
@@ -256,26 +251,37 @@ backlogRouter.post("/api/backlog/poll/start", (req, res) => {
           lastError: null,
         });
       }
-      if (cfg.sources.backlog) cfg.sources.backlog.projectKey = project;
     });
-    startPoller(backlogSource.id);
+    startPoller(laneId);
     res.json({ ok: true, project, intervalMs: POLL_MS });
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
   }
 });
 
-backlogRouter.post("/api/backlog/poll/stop", (_req, res) => {
-  stopPoller(backlogSource.id);
+backlogRouter.post("/api/backlog/poll/stop", (req, res) => {
+  const project = String(req.body?.project ?? "").trim();
+  if (!project) return res.status(400).json({ error: "missing project" });
+  const lane = loadConfig().pipelines.find((p) => p.source === backlogSource.id && p.scope === project);
+  if (!lane) return res.status(404).json({ error: `no poll lane for ${project}` });
+  stopPoller(lane.id);
   saveConfig((cfg) => {
-    const def = cfg.pipelines.find((p) => p.id === backlogSource.id);
+    const def = cfg.pipelines.find((p) => p.id === lane.id);
     if (def) def.state = "paused"; // keep the cursor — a later start on the same scope resumes
   });
   res.json({ ok: true });
 });
 
 backlogRouter.get("/api/backlog/poll/status", (_req, res) => {
-  const def = pipelineById(backlogSource.id);
-  const running = def?.state === "running" && pollTimers.has(backlogSource.id);
-  res.json({ running, project: def?.scope ?? null, ingested: def?.ingested ?? 0, lastId: def?.cursor ?? 0, error: def?.lastError ?? null });
+  const lanes = loadConfig().pipelines
+    .filter((p) => p.source === backlogSource.id)
+    .map((def) => ({
+      project: def.scope ?? null,
+      running: pollTimers.has(def.id),
+      ingested: def.ingested ?? 0,
+      lastId: def.cursor ?? 0,
+      error: def.lastError ?? null,
+      state: def.state,
+    }));
+  res.json({ lanes });
 });
