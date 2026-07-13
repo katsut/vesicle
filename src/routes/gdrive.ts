@@ -442,7 +442,10 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
           claims,
           model,
         });
-        await sink.ingest(batch.items, { pipelineId: GDRIVE_EXTRACT_ID });
+        // Guarded like every lane: extracting an OLDER revision after a newer one (the #58 logical
+        // key's whole point) must not leave the superseded wording at head (head = arrival order).
+        const { repairs } = await repairLateArrivals(guardDb, sink, batch.items, { pipelineId: GDRIVE_EXTRACT_ID });
+        logRepairs(GDRIVE_EXTRACT_ID, repairs);
         totalFacts += batch.factCount;
         results.push({ fileId, name, ok: true, facts: batch.factCount });
         console.log(`  gdrive extract: "${name}" → ${batch.factCount} facts (${batch.entityCount} entities${batch.requiresFloor != null ? `, requires-floor ${batch.requiresFloor}` : ""})`);
