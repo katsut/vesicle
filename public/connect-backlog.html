@@ -102,14 +102,17 @@ async function refresh(){
   if(s.connected){ $("#connHost").textContent = s.host; await loadProjects(); await pollStatus(); }
 }
 let pollTimer = null;
+let shownLane = null; // the running lane the status line + Stop button refer to (Sources shows all lanes)
 async function pollStatus(){
   try{
-    const s = await j("/api/backlog/poll/status");
-    $("#stopPoll").hidden = !s.running;
+    const { lanes } = await j("/api/backlog/poll/status");
+    const sel = $("#project").value;
+    shownLane = lanes.find((l) => l.running && l.project === sel) || lanes.find((l) => l.running) || null;
+    $("#stopPoll").hidden = !shownLane;
     const ps = $("#pollstat");
-    if(s.running){
+    if(shownLane){
       ps.hidden = false;
-      ps.innerHTML = `<span class="dot"></span> streaming ${s.project} · ${s.ingested} facts ingested${s.error ? ` · error: ${s.error}` : ""}`;
+      ps.innerHTML = `<span class="dot"></span> streaming ${shownLane.project} · ${shownLane.ingested} facts ingested${shownLane.error ? ` · error: ${shownLane.error}` : ""}`;
       if(!pollTimer) pollTimer = setInterval(pollStatus, 4000);
     } else {
       ps.hidden = true;
@@ -149,7 +152,8 @@ $("#startPoll").addEventListener("click", async () => {
   finally{ $("#startPoll").disabled = false; }
 });
 $("#stopPoll").addEventListener("click", async () => {
-  try{ await j("/api/backlog/poll/stop", { method: "POST" }); await pollStatus(); show("ok", "Stopped streaming."); }
+  if(!shownLane) return;
+  try{ await j("/api/backlog/poll/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ project: shownLane.project }) }); await pollStatus(); show("ok", "Stopped streaming."); }
   catch(e){ show("err", e.message); }
 });
 $("#disconnect").addEventListener("click", async (e) => { e.preventDefault(); await j("/api/backlog/disconnect", { method: "POST" }); await refresh(); });
