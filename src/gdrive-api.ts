@@ -69,6 +69,7 @@ export interface SharedDrive {
 export const FOLDER_MIME = "application/vnd.google-apps.folder";
 export const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
 export const DOC_MIME = "application/vnd.google-apps.document";
+export const SLIDES_MIME = "application/vnd.google-apps.presentation";
 export const PDF_MIME = "application/pdf";
 
 const API = "https://www.googleapis.com/drive/v3";
@@ -211,6 +212,22 @@ export async function exportDoc(cfg: GdriveApiConfig, fileId: string): Promise<s
   const text = await r.text();
   if (!r.ok) throw new Error(`export doc failed (${r.status}): ${text.slice(0, 300)}`);
   return text;
+}
+
+/** A Slides deck exported as PDF, base64 — decks carry layout/tables the LLM reads natively from
+ *  PDF, so they ride the same extraction path as downloaded PDFs. Same size cap as downloads. */
+export async function exportPdf(cfg: GdriveApiConfig, fileId: string): Promise<{ base64: string; bytes: number }> {
+  const p = new URLSearchParams({ mimeType: "application/pdf" });
+  const r = await fetch(`${API}/files/${encodeURIComponent(fileId)}/export?${p.toString()}`, { headers: authHeaders(cfg) });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`export pdf failed (${r.status}): ${text.slice(0, 300)}`);
+  }
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.byteLength > MAX_DOWNLOAD_BYTES) {
+    throw new Error(`exported PDF is ${(buf.byteLength / (1024 * 1024)).toFixed(1)} MB — larger than the ${MAX_DOWNLOAD_BYTES / (1024 * 1024)} MB extraction cap`);
+  }
+  return { base64: buf.toString("base64"), bytes: buf.byteLength };
 }
 
 /** The body lane's per-file size cap: a document bound for a single LLM call, not an archive sync. */
