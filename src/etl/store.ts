@@ -87,7 +87,7 @@ export interface ConnectorConfig {
 export const RUNS_CAP = 50;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VAR_DIR = resolve(HERE, "../../var");
+const VAR_DIR = process.env.VESICLE_VAR_DIR ?? resolve(HERE, "../../var"); // override for tests/deploys
 const FILE = resolve(VAR_DIR, "config.json");
 
 let cache: ConnectorConfig | null = null;
