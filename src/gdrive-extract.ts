@@ -144,14 +144,24 @@ function outputSpec(dateField: string | undefined): string {
 }`;
 }
 
-export function buildDocPrompt(pattern: DocPattern, doc: DocContent): string {
+export function buildDocPrompt(pattern: DocPattern, doc: DocContent, knownEntities?: Record<string, string[]>): string {
   const date = pattern.date_field
     ? `\nThe pattern declares a date field ("${pattern.date_field}"): when the document states the date a
 rule takes effect (e.g. "effective April 1, 2026"), set "effectiveFrom" on every fact governed by
 that date, as an ISO date. Omit it when the document states none.\n`
     : "";
+  // Claim identity keys on the entity name (#58): when extracting revisions of one document family,
+  // the same provision must reuse the exact name it got before, or it splits into a second node.
+  const knownList = Object.entries(knownEntities ?? {})
+    .filter(([, names]) => names.length)
+    .map(([type, names]) => `  - ${type}: ${names.map((n) => `"${n}"`).join(", ")}`)
+    .join("\n");
+  const known = knownList
+    ? `\nEntities already extracted from earlier revisions of this SAME document family:\n${knownList}\nWhen a fact concerns the same provision/entity as one of these, reuse its EXACT name (verbatim,
+same characters). Introduce a new name only for content that has no counterpart above.\n`
+    : "";
   const body = doc.kind === "text" ? `DOCUMENT:\n"""\n${doc.text}\n"""` : "The DOCUMENT is the attached PDF.";
-  return `${INSTRUCTIONS}\n${date}\n${outputSpec(pattern.date_field)}\n\nEXTRACTION PATTERN:\n${patternForPrompt(pattern)}\n\n${body}\n`;
+  return `${INSTRUCTIONS}\n${date}${known}\n${outputSpec(pattern.date_field)}\n\nEXTRACTION PATTERN:\n${patternForPrompt(pattern)}\n\n${body}\n`;
 }
 
 /** Model output → claims, dropping anything outside the pattern. Missing subject/object types
@@ -182,14 +192,29 @@ export function parseClaims(text: string, pattern: DocPattern): DocClaim[] {
 }
 
 /** ONE LLM call for one document: text inline, PDFs as a native attachment (llm.ts decides the
- *  transport — API document block, or a temp file for the CLI dev harness). */
-export async function extractClaims(pattern: DocPattern, doc: DocContent): Promise<DocClaim[]> {
-  const text = await callLLM(buildDocPrompt(pattern, doc), {
+ *  transport — API document block, or a temp file for the CLI dev harness). `knownEntities` carries
+ *  provision names from earlier revisions of the same document family (see buildDocPrompt). */
+export async function extractClaims(pattern: DocPattern, doc: DocContent, knownEntities?: Record<string, string[]>): Promise<DocClaim[]> {
+  const text = await callLLM(buildDocPrompt(pattern, doc, knownEntities), {
     timeoutMs: 240_000,
     maxTokens: 4096,
     pdfBase64: doc.kind === "pdf" ? doc.base64 : undefined,
   });
   return parseClaims(text, pattern);
+}
+
+/** Entity names seen in a batch of claims, grouped by type — the `knownEntities` for the NEXT
+ *  revision's extraction in the same request. */
+export function entityNamesOf(claims: DocClaim[], into: Record<string, string[]> = {}): Record<string, string[]> {
+  const add = (type: string, name: string) => {
+    const list = (into[type] ??= []);
+    if (!list.includes(name)) list.push(name);
+  };
+  for (const c of claims) {
+    add(c.subjectType, c.subject);
+    if (c.objectType) add(c.objectType, c.object);
+  }
+  return into;
 }
 
 // --- claims → ingest batch --------------------------------------------------------------------------

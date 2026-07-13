@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { authorizeUrl as gdriveAuthorizeUrl, exchangeCode as gdriveExchangeCode, refreshToken as refreshGoogleToken } from "../gdrive-oauth.ts";
 import { DOC_MIME, PDF_MIME, SLIDES_MIME, downloadFile, exportDoc, exportPdf, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "../gdrive-api.ts";
 import { driveFileToBatch, sensitivityLabel } from "../gdrive.ts";
-import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, extractClaims, type DocContent, type DocPattern } from "../gdrive-extract.ts";
+import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, entityNamesOf, extractClaims, type DocContent, type DocPattern } from "../gdrive-extract.ts";
 import { evaluateSharing, recordSharingReview, type SharingDecision } from "../access-conformance.ts";
 import { Stroma } from "../stroma.ts";
 import { repairLateArrivals } from "../etl/guard.ts";
@@ -421,6 +421,10 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
     const startedAt = Date.now();
     const results: Array<{ fileId: string; name: string; ok: boolean; facts: number; error?: string }> = [];
     let totalFacts = 0;
+    // Revisions extracted under one logicalDocId share claim identity by entity NAME (#58), so each
+    // later file's prompt carries the names already minted in this request — naming drift across
+    // revisions is what splits one provision into two nodes (#64).
+    const knownEntities: Record<string, string[]> = {};
     for (const fileId of fileIds) {
       let name = fileId;
       try {
@@ -432,7 +436,8 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
         else if (mime === PDF_MIME) doc = { kind: "pdf", base64: (await downloadFile(cfg, file.id)).base64 };
         else if (mime === SLIDES_MIME) doc = { kind: "pdf", base64: (await exportPdf(cfg, file.id)).base64 };
         else throw new Error(`unsupported mimeType ${mime || "(none)"} — only PDF, Google Docs and Slides are readable`);
-        const claims = await extractClaims(pattern, doc);
+        const claims = await extractClaims(pattern, doc, logicalDocId ? knownEntities : undefined);
+        if (logicalDocId) entityNamesOf(claims, knownEntities);
         const batch = claimsToBatch({
           fileId: file.id,
           logicalDocId,

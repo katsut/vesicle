@@ -14,6 +14,7 @@ import {
   DEFAULT_PATTERN,
   buildDocPrompt,
   claimNid,
+  entityNamesOf,
   claimsToBatch,
   classifyFiles,
   parseClaims,
@@ -220,4 +221,27 @@ test("claimsToBatch: a shared logicalDocId lands the same provision from two rev
   // and without logicalDocId the key falls back to the fileId (unchanged behavior)
   const solo = claimsToBatch({ fileId: "file-v1", claims, ...common });
   assert.equal(nodesOf(solo.items)[0]!.id, claimNid("file-v1", "Rule", "Rule 4.2"));
+});
+
+test("buildDocPrompt: known entities from earlier revisions instruct exact-name reuse", () => {
+  const known = { Rule: ["対象範囲", "役割（ミッション）評価"], Section: [] };
+  const p = buildDocPrompt(DEFAULT_PATTERN, { kind: "text", text: "doc" }, known);
+  assert.ok(p.includes('"対象範囲"'));
+  assert.ok(p.includes("reuse its EXACT name"));
+  assert.ok(!p.includes("Section:"), "empty type lists are omitted");
+  const bare = buildDocPrompt(DEFAULT_PATTERN, { kind: "text", text: "doc" });
+  assert.ok(!bare.includes("SAME document family"), "no known-entities block without input");
+});
+
+test("entityNamesOf: accumulates subject and edge-object names by type, deduped", () => {
+  const claims: DocClaim[] = [
+    { subject: "Rule A", subjectType: "Rule", predicate: "rule-title", object: "t" },
+    { subject: "Rule A", subjectType: "Rule", predicate: "in-section", object: "S1", objectType: "Section" },
+    { subject: "Rule B", subjectType: "Rule", predicate: "rule-title", object: "t2" },
+  ];
+  const acc = entityNamesOf(claims);
+  assert.deepEqual(acc.Rule, ["Rule A", "Rule B"]);
+  assert.deepEqual(acc.Section, ["S1"]);
+  entityNamesOf([{ subject: "Rule A", subjectType: "Rule", predicate: "rule-title", object: "x" }], acc);
+  assert.deepEqual(acc.Rule, ["Rule A", "Rule B"], "re-adding an existing name is a no-op");
 });
