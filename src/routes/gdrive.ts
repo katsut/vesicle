@@ -424,7 +424,15 @@ gdriveRouter.post("/api/gdrive/funnel/triage", async (req, res) => {
     for (const f of listed) hydrated.push(await hydrateFile(cfg, f));
     const { files } = classifyFiles(hydrated);
     if (!files.length) return res.json({ files: [] });
-    const meta = files.map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, modifiedTime: f.modifiedTime, draft: f.draft }));
+    // compact on purpose: 100+ files ride ONE call, so absent fields are omitted and the JSON is
+    // not pretty-printed — prompt size is what pushed the first live run past the LLM timeout
+    const meta = files.map((f) => ({
+      id: f.id,
+      name: f.name,
+      mimeType: f.mimeType,
+      ...(f.modifiedTime ? { modifiedTime: f.modifiedTime } : {}),
+      ...(f.draft ? { draft: true } : {}),
+    }));
     const prompt = `You triage a file listing for a document-extraction pipeline. Using ONLY the metadata below
 (you cannot see file contents), classify each file and decide whether it belongs on the shortlist.
 
@@ -437,8 +445,8 @@ Rules:
 - Answer for EVERY file, same order. Output ONLY JSON: {"files":[{"id":"...","category":"...","select":true,"reason":"..."}]}
 
 FILES:
-${JSON.stringify(meta, null, 1)}`;
-    const text = await callLLM(prompt, { timeoutMs: 120_000, maxTokens: 4096 });
+${JSON.stringify(meta)}`;
+    const text = await callLLM(prompt, { timeoutMs: 240_000, maxTokens: 4096 });
     const parsed = extractJson(text) as { files?: Array<{ id?: string; category?: string; select?: boolean; reason?: string }> };
     const known = new Set(files.map((f) => f.id));
     const out = (parsed.files ?? [])
