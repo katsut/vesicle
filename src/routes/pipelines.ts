@@ -1,0 +1,103 @@
+// Cross-source read-model and admin routes: server status, engine stats, the explicit sink reset,
+// the pipelines view, and decision-authority conformance. All behind the session auth gate.
+
+import express from "express";
+import { Stroma } from "../stroma.ts";
+import { review, type Rule } from "../conformance.ts";
+import { recordReview, type Decision } from "../review.ts";
+import { loadConfig } from "../etl/store.ts";
+import { sink } from "../runtime.ts";
+
+// Default decision-authority policy: a release must be approved by the manager of the assignee's
+// department, as of the approval time. Authored here; the engine evaluates it deterministically.
+const DEFAULT_CONFORMANCE_RULE: Rule = {
+  subject_type: "Issue",
+  scope: { predicate: "issue-type", equals: "release" },
+  required: { hops: [{ predicate: "assigned-to" }, { predicate: "member-of" }, { predicate: "manager-of", as_of: "approved-at" }] },
+  actual: "approved-by",
+  absent_when: { predicate: "status", equals: "released" },
+};
+
+// /api/status reports the auth mode — these mirror the env reads behind the gate in server.ts.
+const USER = process.env.VESICLE_USER ?? "admin";
+const NO_AUTH = process.env.VESICLE_NO_AUTH === "1";
+
+export const pipelinesRouter = express.Router();
+
+pipelinesRouter.get("/api/status", async (_req, res) => {
+  const url = process.env.STROMA_URL ?? "http://127.0.0.1:7687";
+  const stroma = await new Stroma().health();
+  res.json({ stroma, url, auth: !NO_AUTH, user: NO_AUTH ? null : USER });
+});
+
+// Live pipeline view polls this: engine reachability + write counters (a rising changelog head = facts streaming in).
+pipelinesRouter.get("/api/stroma-stats", async (_req, res) => {
+  try {
+    const st = await sink.stats();
+    res.json(st ? { reachable: true, stats: st } : { reachable: false });
+  } catch (e) {
+    res.json({ reachable: false, error: (e as Error).message });
+  }
+});
+
+// Admin: wipe the engine database. Deliberately NOT part of any ingest path — every pipeline loads
+// incrementally; this is the one explicit destructive action (the sink settings surface calls it).
+// Requires { confirm: true } so a stray call can't clear the graph. No-op if the engine runs without
+// --allow-reset.
+pipelinesRouter.post("/api/sink/reset", async (req, res) => {
+  if (req.body?.confirm !== true) return res.status(400).json({ error: "pass { confirm: true } to reset the sink" });
+  try {
+    await sink.reset();
+    console.log("  /api/sink/reset → engine database cleared");
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// All persisted lanes plus the capped run history — the read model for the pipelines UI. Additive:
+// the per-source endpoints keep serving the existing pages.
+pipelinesRouter.get("/api/pipelines", (_req, res) => {
+  const cfg = loadConfig();
+  res.json({ pipelines: cfg.pipelines, runs: cfg.runs });
+});
+
+// POST /api/conformance → { rule? } evaluate the declared decision-authority rule in the engine
+// (deterministic, no LLM) and return a human-reviewable report of the gaps (ABSENT + MISMATCH).
+pipelinesRouter.post("/api/conformance", async (req, res) => {
+  try {
+    const rule = (req.body?.rule as Rule | undefined) ?? DEFAULT_CONFORMANCE_RULE;
+    const db = new Stroma();
+    if (!(await db.health())) {
+      return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
+    }
+    await db.ensureAuthed();
+    const report = await review(db, rule);
+    res.json(report);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// POST /api/conformance/resolve → { issue, decision, reviewer?, note? } record a human decision on a
+// gap as human-asserted facts (the flywheel's first turn).
+pipelinesRouter.post("/api/conformance/resolve", async (req, res) => {
+  try {
+    const issue = Number(req.body?.issue);
+    const decision = req.body?.decision as Decision | undefined;
+    if (!Number.isInteger(issue) || !["confirmed", "waived", "data-gap"].includes(decision ?? "")) {
+      return res.status(400).json({ error: "expected { issue:int, decision: confirmed|waived|data-gap, reviewer?, note? }" });
+    }
+    const reviewer = (req.body?.reviewer as string | undefined) ?? "reviewer";
+    const note = req.body?.note as string | undefined;
+    const db = new Stroma();
+    if (!(await db.health())) {
+      return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
+    }
+    await db.ensureAuthed();
+    await recordReview(db, { issue, decision: decision as Decision, reviewer, note });
+    res.json({ ok: true, issue, decision, reviewer });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
