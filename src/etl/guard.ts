@@ -49,11 +49,16 @@ export async function repairLateArrivals(db: Stroma, sink: Sink, batch: BatchIte
   // The write that ends up as write-order head per (subject, predicate) — the last one in the batch.
   // Facts and closes on a one-predicate both take head; writes without a valid_from are skipped
   // (nothing to compare against).
-  const incoming = new Map<string, { subject: number; predicate: string; validFrom: number }>();
+  const incoming = new Map<string, { subject: number; predicate: string; validFrom: number; object?: FactObject }>();
   for (const item of batch) {
     const w = "fact" in item ? item.fact : "close" in item ? item.close : null;
     if (!w || w.valid_from == null || !onePreds.has(w.predicate)) continue;
-    incoming.set(`${w.subject}|${w.predicate}`, { subject: w.subject, predicate: w.predicate, validFrom: w.valid_from });
+    incoming.set(`${w.subject}|${w.predicate}`, {
+      subject: w.subject,
+      predicate: w.predicate,
+      validFrom: w.valid_from,
+      object: "fact" in item ? item.fact.object : undefined,
+    });
   }
 
   // Read the current winners BEFORE the batch lands — afterwards head is already the late value.
@@ -77,6 +82,14 @@ export async function repairLateArrivals(db: Stroma, sink: Sink, batch: BatchIte
     if (cur.one) {
       const object: FactObject | null = cur.one.node != null ? { node: cur.one.node } : cur.one.text != null ? { text: cur.one.text } : null;
       if (!object) continue;
+      // An equal-valued row taking write-order head changes nothing any read can observe — no
+      // repair. Without this, observation-independent facts (valid_from 0) would fight older
+      // stored rows on every re-sync: land, get repaired over, land again next time, forever.
+      const sameValue =
+        inc.object != null &&
+        (("node" in inc.object && "node" in object && inc.object.node === object.node) ||
+          ("text" in inc.object && "text" in object && inc.object.text === object.text));
+      if (sameValue) continue;
       repairs.push({ subject: inc.subject, predicate: inc.predicate, object, validFrom: curVf, incomingValidFrom: inc.validFrom });
     } else {
       // the head was ended by a newer close — re-assert the close so the late value doesn't resurrect it
