@@ -71,9 +71,19 @@
   .streamhead{display:flex;align-items:center;gap:10px;margin:2px 2px 12px}
   .streamhead h2{font-size:15px;margin:0;letter-spacing:-.01em}
   .streamhead .bar{flex:1;height:1px;background:var(--line)}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-items:start}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
   .card{background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;box-shadow:var(--bevel),var(--shadow)}
   .card.planned{opacity:.55}
+  /* Tier 1: uniform connector cards — description fills, action row pinned to the bottom */
+  .card.connector{display:flex;flex-direction:column;min-height:150px;cursor:pointer}
+  .card.connector.planned{cursor:default}
+  .card.connector .sdesc{flex:1;margin:0 0 12px}
+  .card.connector.selected{border-color:color-mix(in oklab,var(--accent) 60%,var(--line));outline:2px solid color-mix(in oklab,var(--accent) 45%,transparent);outline-offset:-1px}
+  .sact{display:flex;gap:8px;margin-top:auto;min-height:40px;align-items:flex-start}
+  /* Tier 2: detail panel hosting the selected connector's working surface */
+  .detail{margin-top:14px}
+  .dhead{display:flex;align-items:center;gap:9px;padding-bottom:10px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+  .dhead b{font-size:14px}
   .shead{display:flex;align-items:center;gap:9px;margin-bottom:4px}
   .ic{flex:none;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:13px;font-weight:700;background:color-mix(in oklab,var(--accent) 18%,transparent);color:var(--accent)}
   .ic.clay{background:color-mix(in oklab,var(--clay) 22%,transparent);color:var(--clay)}
@@ -151,30 +161,42 @@
   <div id="oauthDone" class="msg ok" style="margin:0 0 14px" hidden data-i18n="oauth_done"></div>
 
   <div class="streamhead"><h2 data-i18n="head_connectors"></h2><div class="bar"></div></div>
+  <!-- Tier 1: uniform connector grid — status + one action per card; the working surface lives in the detail panel below -->
   <div class="grid">
-    <div class="card" id="backlogCard">
+    <div class="card connector" id="backlogCard">
       <div class="shead"><span class="ic clay">B</span><b>Backlog</b><span class="st" id="blStatus" data-i18n="st_checking"></span></div>
       <p class="sdesc" data-i18n="backlog_desc"></p>
-      <div id="blBody"><div class="loading" data-i18n="loading"></div></div>
+      <div class="sact" id="blAct"></div>
     </div>
-    <div class="card" id="gdriveCard">
+    <div class="card connector" id="gdriveCard">
       <div class="shead"><span class="ic">D</span><b>Google Drive</b><span class="st" id="gdStatus" data-i18n="st_checking"></span></div>
       <p class="sdesc" data-i18n="gdrive_desc"></p>
-      <div id="gdBody"><div class="loading" data-i18n="loading"></div></div>
+      <div class="sact" id="gdAct"></div>
     </div>
-    <div class="card planned">
+    <div class="card connector planned">
       <div class="shead"><span class="ic">P</span><b>PostgreSQL</b><span class="st" data-i18n="planned"></span></div>
       <p class="sdesc" data-i18n="planned_desc"></p>
+      <div class="sact"></div>
     </div>
-    <div class="card planned">
+    <div class="card connector planned">
       <div class="shead"><span class="ic clay">J</span><b>Jira</b><span class="st" data-i18n="planned"></span></div>
       <p class="sdesc" data-i18n="planned_desc"></p>
+      <div class="sact"></div>
     </div>
-    <div class="card planned">
+    <div class="card connector planned">
       <div class="shead"><span class="ic txt">C</span><b>Confluence</b><span class="st" data-i18n="planned"></span></div>
       <p class="sdesc" data-i18n="planned_desc"></p>
+      <div class="sact"></div>
     </div>
   </div>
+
+  <!-- Tier 2: detail panel — hosts the selected connector's full body (#blBody / #gdBody, one visible at a time) -->
+  <section class="card detail" id="detailPanel">
+    <div class="dhead" id="detailHead" hidden><span class="ic" id="detailIc"></span><b id="detailName"></b></div>
+    <p class="hint" id="detailHint" style="margin:0" data-i18n="detail_hint"></p>
+    <div id="blBody" hidden><div class="loading" data-i18n="loading"></div></div>
+    <div id="gdBody" hidden><div class="loading" data-i18n="loading"></div></div>
+  </section>
 
   <div class="note" data-i18n="lanes_note"></div>
 </div>
@@ -206,6 +228,8 @@ const I18N = {
     msg_stopped: "Stopped streaming.",
     msg_webhook: "Webhook #{id} installed on {project}.\nDelivering to {url}",
     planned: "planned", planned_desc: "Not yet available.",
+    connect_short: "Connect", manage_btn: "Manage →",
+    detail_hint: "Connect a source to configure it here.",
     lanes_note: "Connected sources feed ingestion lanes — watch them run in <a href=\"/pipelines.html\">Pipelines</a>.",
     err_unauthorized: "Sign-in required — <a href=\"/login\">sign in</a> and reload.",
     err_request: "Request failed: {e}",
@@ -255,6 +279,8 @@ const I18N = {
     msg_stopped: "ストリーミングを停止しました。",
     msg_webhook: "Webhook #{id} を {project} に設置しました。\n配信先: {url}",
     planned: "予定", planned_desc: "まだ利用できません。",
+    connect_short: "接続", manage_btn: "管理 →",
+    detail_hint: "ソースを接続すると、ここで設定できます。",
     lanes_note: "接続済みのソースは取り込みレーンに供給されます — 稼働状況は <a href=\"/pipelines.html\">Pipelines</a> で確認できます。",
     err_unauthorized: "サインインが必要です — <a href=\"/login\">サインイン</a>して再読み込みしてください。",
     err_request: "リクエストに失敗しました: {e}",
@@ -304,6 +330,8 @@ const I18N = {
     msg_stopped: "已停止流式。",
     msg_webhook: "已在 {project} 上安装 Webhook #{id}。\n投递至 {url}",
     planned: "计划中", planned_desc: "暂不可用。",
+    connect_short: "连接", manage_btn: "管理 →",
+    detail_hint: "连接数据源后即可在此进行配置。",
     lanes_note: "已连接的数据源供给摄取通道 — 在 <a href=\"/pipelines.html\">Pipelines</a> 中查看运行情况。",
     err_unauthorized: "需要登录 — 请<a href=\"/login\">登录</a>后重新加载。",
     err_request: "请求失败: {e}",
@@ -390,6 +418,50 @@ async function refreshStatus() {
   }
 }
 
+// --- Tier-2 selection: which connector's body the detail panel shows ---
+const CONNECTORS = {
+  backlog: { card: "#backlogCard", body: "#blBody", icClass: "ic clay", letter: "B", name: "Backlog" },
+  gdrive: { card: "#gdriveCard", body: "#gdBody", icClass: "ic", letter: "D", name: "Google Drive" },
+};
+let SELECTED = null; // "backlog" | "gdrive" | null (null → the panel shows the connect hint)
+function selectConnector(id) {
+  SELECTED = id;
+  for (const [k, c] of Object.entries(CONNECTORS)) {
+    $(c.card).classList.toggle("selected", k === id);
+    $(c.body).hidden = k !== id;
+  }
+  const c = CONNECTORS[id];
+  $("#detailHead").hidden = !c;
+  $("#detailHint").hidden = !!c;
+  if (c) {
+    $("#detailIc").className = c.icClass;
+    $("#detailIc").textContent = c.letter;
+    $("#detailName").textContent = c.name;
+  }
+}
+$("#backlogCard").onclick = () => selectConnector("backlog");
+$("#gdriveCard").onclick = () => selectConnector("gdrive");
+
+// Tier-1 action rows: Connect when disconnected, Manage when there is a body worth opening.
+function renderBlAction() {
+  const el = $("#blAct");
+  if (BL.state === "disconnected") el.innerHTML = `<button class="btn" id="blConnect">${t("connect_short")}</button>`;
+  else if (BL.state === "connected" || BL.state === "error") el.innerHTML = `<button class="btn ghost" id="blManage">${t("manage_btn")}</button>`;
+  else el.innerHTML = "";
+  // Backlog connects via the host form in the body — select the panel and focus the field.
+  const c = $("#blConnect"); if (c) c.onclick = () => { selectConnector("backlog"); $("#host")?.focus(); };
+  const m = $("#blManage"); if (m) m.onclick = () => selectConnector("backlog");
+}
+function renderGdAction() {
+  const el = $("#gdAct");
+  if (GD.state === "disconnected") el.innerHTML = `<button class="btn" id="gdConnect">${t("connect_short")}</button>`;
+  else if (GD.state === "connected" || GD.state === "error") el.innerHTML = `<button class="btn ghost" id="gdManage">${t("manage_btn")}</button>`;
+  else el.innerHTML = "";
+  // Drive needs no parameters — go straight to the OAuth start the body form points at.
+  const c = $("#gdConnect"); if (c) c.onclick = () => { location.href = "/api/gdrive/oauth/start"; };
+  const m = $("#gdManage"); if (m) m.onclick = () => selectConnector("gdrive");
+}
+
 // --- Backlog card state machine: loading → error | disconnected | connected ---
 // lanes mirrors /api/backlog/poll/status — one poll lane per project.
 const BL = { state: "loading", host: null, projects: null, projectsError: null, lanes: [], msg: null, error: null };
@@ -406,6 +478,7 @@ function setStatusChip() {
 
 function renderBacklog() {
   setStatusChip();
+  renderBlAction();
   const root = $("#blBody"); root.innerHTML = "";
   if (BL.state === "loading") { root.innerHTML = `<div class="loading">${t("loading")}</div>`; return; }
   if (BL.state === "error") {
@@ -569,6 +642,7 @@ function gdStreamLine() {
 
 function renderGdrive() {
   setGdStatusChip();
+  renderGdAction();
   const root = $("#gdBody"); root.innerHTML = "";
   if (GD.state === "loading") { root.innerHTML = `<div class="loading">${t("loading")}</div>`; return; }
   if (GD.state === "error") {
@@ -901,12 +975,14 @@ async function refreshGdrive() {
   }
 }
 
-// arriving from an OAuth callback (?connected=1 → Backlog, ?connected=gdrive → Drive): confirm and clean the URL
+// arriving from an OAuth callback (?connected=1 → Backlog, ?connected=gdrive → Drive): confirm,
+// land with that connector selected in the detail panel, and clean the URL
 {
   const connectedParam = new URLSearchParams(location.search).get("connected");
   if (connectedParam) {
     if (connectedParam === "gdrive") $("#oauthDone").setAttribute("data-i18n", "oauth_done_gdrive");
     $("#oauthDone").hidden = false;
+    selectConnector(connectedParam === "gdrive" ? "gdrive" : "backlog");
     history.replaceState(null, "", location.pathname);
   }
 }
@@ -914,8 +990,13 @@ async function refreshGdrive() {
 applyTheme();
 setLang(LANG);
 refreshStatus();
-refresh();
-refreshGdrive();
+// Default selection once both connector statuses are known: first connected wins (Backlog if both).
+// An explicit selection (OAuth landing or a click while loading) is never overridden.
+Promise.allSettled([refresh(), refreshGdrive()]).then(() => {
+  if (SELECTED) return;
+  if (BL.state === "connected") selectConnector("backlog");
+  else if (GD.state === "connected") selectConnector("gdrive");
+});
 </script>
 </body>
 </html>
