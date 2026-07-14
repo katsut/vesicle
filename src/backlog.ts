@@ -80,7 +80,7 @@ export const SCHEMA: BatchItem[] = [
   { pred_def: { name: "assigned-to", cardinality: "one", domain: "Issue", range: "Person" } },
   { pred_def: { name: "in-project", cardinality: "one", domain: "Issue", range: "Project" } },
   { pred_def: { name: "created-by", cardinality: "one", domain: "Issue", range: "Person" } },
-  { pred_def: { name: "content", cardinality: "one", domain: "Comment", range_value: "text" } },
+  { pred_def: { name: "content", cardinality: "one", domain: "Comment", range_value: "text", display: true } },
   { pred_def: { name: "on-issue", cardinality: "one", domain: "Comment", range: "Issue" } },
   { pred_def: { name: "commented-by", cardinality: "one", domain: "Comment", range: "Person" } },
 ];
