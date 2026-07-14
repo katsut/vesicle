@@ -136,6 +136,7 @@
   <div id="out"><div class="loading" data-i18n="loading"></div></div>
   <div id="identities"></div>
   <div id="approvals"></div>
+  <div id="patterns"></div>
 </div>
 
 <script type="module">
@@ -177,6 +178,16 @@ const I18N = {
     ap_confirmed: "✓ confirmed", ap_dismissed: "dismissed",
     ap_empty: "no candidates",
     ap_offline: "StromaDB is not reachable — candidate generation needs the engine.",
+    patterns_head: "Patterns",
+    pat_tagline: "Mined rule candidates from event regularities — deterministic counts over the graph, no LLM. Promote asserts a MinedRule record, Record as risk a RiskNote record (provenance pattern-review); Dismiss only stops the pattern from being proposed.",
+    tmpl_issue_assignee: "Issue assignment",
+    tmpl_comment_author: "Comment authors",
+    tmpl_doc_access: "Document access",
+    pat_promote: "Promote to rule", pat_risk: "Record as risk", pat_dismiss: "Dismiss",
+    pat_exceptions: "{n} exceptions",
+    pat_exceptions_more: "+{n} more not shown",
+    pat_empty: "no candidates",
+    pat_offline: "StromaDB is not reachable — candidate generation needs the engine.",
   },
   ja: {
     nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル",
@@ -211,6 +222,16 @@ const I18N = {
     ap_confirmed: "✓ 確認済み", ap_dismissed: "却下済み",
     ap_empty: "候補はありません",
     ap_offline: "StromaDB に接続できません — 候補の生成にはエンジンが必要です。",
+    patterns_head: "パターン",
+    pat_tagline: "イベントの規則性から数え上げたルール候補 — グラフ上の決定論的カウントで、LLM は使いません。「ルールに昇格」は MinedRule レコードを、「リスクとして記録」は RiskNote レコードを書き込み（来歴は pattern-review）、「却下」はこのパターンが提案されなくなるだけです。",
+    tmpl_issue_assignee: "課題の担当",
+    tmpl_comment_author: "コメントの書き手",
+    tmpl_doc_access: "文書アクセス",
+    pat_promote: "ルールに昇格", pat_risk: "リスクとして記録", pat_dismiss: "却下",
+    pat_exceptions: "例外 {n} 件",
+    pat_exceptions_more: "他 {n} 件は省略",
+    pat_empty: "候補はありません",
+    pat_offline: "StromaDB に接続できません — 候補の生成にはエンジンが必要です。",
   },
   zh: {
     nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型",
@@ -245,6 +266,16 @@ const I18N = {
     ap_confirmed: "✓ 已确认", ap_dismissed: "已忽略",
     ap_empty: "没有候选",
     ap_offline: "无法连接 StromaDB — 生成候选需要引擎。",
+    patterns_head: "模式",
+    pat_tagline: "从事件规律中数出的规则候选 — 图上的确定性计数，不使用 LLM。「提升为规则」写入 MinedRule 记录，「记为风险」写入 RiskNote 记录（来源为 pattern-review）；「忽略」只是不再提议该模式。",
+    tmpl_issue_assignee: "议题指派",
+    tmpl_comment_author: "评论作者",
+    tmpl_doc_access: "文档访问",
+    pat_promote: "提升为规则", pat_risk: "记为风险", pat_dismiss: "忽略",
+    pat_exceptions: "{n} 个例外",
+    pat_exceptions_more: "还有 {n} 个未显示",
+    pat_empty: "没有候选",
+    pat_offline: "无法连接 StromaDB — 生成候选需要引擎。",
   },
 };
 let LANG = "en";
@@ -259,6 +290,7 @@ function applyLang() {
   render();
   renderIdentities();
   renderApprovals();
+  renderPatterns();
 }
 
 const store = {
@@ -554,6 +586,92 @@ $("#approvals").addEventListener("click", async (ev) => {
   await loadApprovals();
 });
 
+// --- Patterns: mined rule candidates from event regularities (GET /api/patterns/candidates).
+// Deterministic counts only — the card shows the counted evidence verbatim: group, support/total,
+// the target set, and the exceptions (collapsed). Dismissed patterns are excluded server-side.
+// Each card takes a three-way verdict — promote / risk / dismiss — POSTed to /api/patterns/resolve,
+// then reload.
+let PATS = { kind: "loading" };
+
+const TMPL_KEY = { "issue-assignee": "tmpl_issue_assignee", "comment-author": "tmpl_comment_author", "doc-access": "tmpl_doc_access" };
+
+function patCard(c) {
+  const period = c.windowFrom
+    ? `${new Date(c.windowFrom * 1000).toLocaleDateString()} – ${new Date(c.windowTo * 1000).toLocaleDateString()}`
+    : "—";
+  const chips = c.targets.map((p) => `<span class="etype">${esc(p.name ?? p.id)}</span>`).join("");
+  const exTotal = c.exceptions.length + c.exceptionsOmitted;
+  const exceptions = exTotal
+    ? `<details class="srcmap" style="margin-top:10px"><summary>${esc(t("pat_exceptions", { n: exTotal }))}</summary>
+        <div class="inner"><div class="chips">${c.exceptions.map((e) => `<span class="maprow">${esc(clip(String(e.name ?? e.id), 80))}</span>`).join("")}${
+          c.exceptionsOmitted ? `<span class="snip">${esc(t("pat_exceptions_more", { n: c.exceptionsOmitted }))}</span>` : ""}</div></div></details>`
+    : "";
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+      <span class="cardin">${esc(t(TMPL_KEY[c.template] ?? c.template))}</span>
+      <b>${esc(c.group.name ?? c.group.id)}</b>
+      <span class="cardin strong">${c.support}/${c.total}</span>
+      <span class="snip">${esc(period)}</span>
+    </div>
+    <div class="chips" style="margin-top:9px"><span class="maprow"><b>${esc(c.predicate)}</b></span>${chips}</div>
+    ${exceptions}
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button class="rowbtn" data-act="promote" data-id="${esc(c.patternId)}">${esc(t("pat_promote"))}</button>
+      <button class="rowbtn ghost" data-act="risk" data-id="${esc(c.patternId)}">${esc(t("pat_risk"))}</button>
+      <button class="rowbtn ghost" data-act="dismiss" data-id="${esc(c.patternId)}">${esc(t("pat_dismiss"))}</button>
+    </div>
+  </div>`;
+}
+
+function renderPatterns() {
+  const el = $("#patterns"); if (!el) return;
+  const head = `<div class="streamhead"><h2>${t("patterns_head")}</h2><div class="bar"></div></div>
+    <p class="tagline" style="margin:0 0 12px">${esc(t("pat_tagline"))}</p>`;
+  if (PATS.kind === "loading") { el.innerHTML = head + `<div class="loading">${t("loading")}</div>`; return; }
+  if (PATS.kind === "offline") { el.innerHTML = head + `<div class="empty">${esc(t("pat_offline"))}</div>`; return; }
+  if (PATS.kind === "unauthorized") { el.innerHTML = head + `<div class="err">${t("err_unauthorized")}</div>`; return; }
+  if (PATS.kind === "error") { el.innerHTML = head + `<div class="err">${esc(t("err_request", { e: PATS.message }))}</div>`; return; }
+  el.innerHTML = head + (PATS.candidates.length
+    ? PATS.candidates.map(patCard).join("")
+    : `<div class="empty">${esc(t("pat_empty"))}</div>`);
+}
+
+async function loadPatterns() {
+  try {
+    const r = await fetch("/api/patterns/candidates");
+    if (r.status === 503) { PATS = { kind: "offline" }; renderPatterns(); return; }
+    if (r.status === 401) { PATS = { kind: "unauthorized" }; renderPatterns(); return; }
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j) { PATS = { kind: "error", message: (j && j.error) || `HTTP ${r.status}` }; renderPatterns(); return; }
+    PATS = { kind: "data", candidates: Array.isArray(j.candidates) ? j.candidates : [] };
+  } catch (e) {
+    PATS = { kind: "error", message: e.message };
+  }
+  renderPatterns();
+}
+
+// Promote/Risk/Dismiss (event delegation): the verdict itself is the whole interaction — no prompt.
+$("#patterns").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-act]");
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/patterns/resolve", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ patternId: btn.dataset.id, verdict: btn.dataset.act }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => null);
+      throw new Error((j && j.error) || `HTTP ${r.status}`);
+    }
+  } catch (e) {
+    PATS = { kind: "error", message: e.message };
+    renderPatterns();
+    return;
+  }
+  await loadPatterns();
+});
+
 async function load() {
   try {
     const r = await fetch("/api/model");
@@ -575,6 +693,7 @@ refreshStatus();
 load();
 loadIdentities();
 loadApprovals();
+loadPatterns();
 </script>
 </body>
 </html>

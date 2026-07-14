@@ -30,6 +30,7 @@ import { backlogRouter, backlogWebhookRouter } from "./routes/backlog.ts";
 import { gdriveRouter } from "./routes/gdrive.ts";
 import { identitiesRouter } from "./routes/identities.ts";
 import { modelRouter } from "./routes/model.ts";
+import { patternsRouter } from "./routes/patterns.ts";
 import { pipelinesRouter } from "./routes/pipelines.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -108,6 +109,7 @@ app.post("/api/logout", (req, res) => {
 app.use(pipelinesRouter); // /api/status, /api/stroma-stats, /api/sink/reset, /api/pipelines, /api/conformance*
 app.use(identitiesRouter); // /api/identities/*
 app.use(approvalsRouter); // /api/approvals/*
+app.use(patternsRouter); // /api/patterns/*
 app.use(backlogRouter); // /api/backlog/*
 app.use(gdriveRouter); // /api/gdrive/*
 
