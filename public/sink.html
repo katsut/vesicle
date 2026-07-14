@@ -78,6 +78,16 @@
   .engrow.off .state{color:var(--bad);background:color-mix(in oklab,var(--bad) 10%,transparent);border-color:color-mix(in oklab,var(--bad) 34%,transparent)}
   .url{font:12px var(--mono);color:var(--mut);word-break:break-all;margin-top:7px}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:15px}
+  .syshead{margin:18px 0 8px;font-size:12.5px;font-weight:650;color:var(--ink-dim);letter-spacing:.04em;text-transform:uppercase}
+  .comp{display:flex;flex-direction:column;gap:6px}
+  .comp .crow{display:grid;grid-template-columns:130px 1fr 64px;gap:10px;align-items:center;font-size:13px}
+  .comp .cbar{height:8px;border-radius:4px;background:color-mix(in oklab,var(--accent) 18%,transparent);overflow:hidden}
+  .comp .cbar i{display:block;height:100%;border-radius:4px;background:var(--accent)}
+  .comp .cn{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-dim)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chips .chip{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--ink-dim);font-family:ui-monospace,monospace}
+  .chips .chip b{color:var(--ink);font-family:inherit}
+  .conlink{margin-top:14px;font-size:13px}
   .tile{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px}
   .tile .v{font:640 24px/1.1 var(--mono);letter-spacing:-.02em}
   .tile .l{color:var(--mut);font-size:11.5px;margin-top:5px;text-transform:uppercase;letter-spacing:.07em;font-weight:600}
@@ -135,7 +145,18 @@
     <div class="stats">
       <div class="tile"><div class="v" id="factsV">—</div><div class="l" data-i18n="facts_label"></div></div>
       <div class="tile"><div class="v" id="nodesV">—</div><div class="l" data-i18n="nodes_label"></div></div>
+      <div class="tile"><div class="v" id="typesV">—</div><div class="l" data-i18n="types_label"></div></div>
+      <div class="tile"><div class="v" id="predsV">—</div><div class="l" data-i18n="preds_label"></div></div>
+      <div class="tile"><div class="v" id="uptimeV">—</div><div class="l" data-i18n="uptime_label"></div></div>
+      <div class="tile"><div class="v" id="walV">—</div><div class="l" data-i18n="wal_label"></div></div>
     </div>
+    <div class="syshead" data-i18n="comp_head"></div>
+    <div class="comp" id="compRows"><div class="loading" data-i18n="loading"></div></div>
+    <div class="syshead" data-i18n="labels_head"></div>
+    <div class="chips" id="labelChips">—</div>
+    <div class="syshead" data-i18n="sources_head"></div>
+    <div class="chips" id="sourceChips">—</div>
+    <div class="conlink"><a id="consoleLink" target="_blank" rel="noopener" data-i18n="open_console"></a> <span id="engVer" style="color:var(--ink-dim);font-size:12px"></span></div>
     <details class="raw"><summary data-i18n="raw_stats"></summary><pre id="rawStats">—</pre></details>
   </div>
 
@@ -168,6 +189,10 @@ const I18N = {
     conn_head: "Engine connection",
     conn_ok: "connected", conn_bad: "unreachable",
     facts_label: "Facts (durable head)", nodes_label: "Nodes",
+    types_label: "Types", preds_label: "Predicates", uptime_label: "Engine uptime", wal_label: "WAL size",
+    comp_head: "Graph composition", labels_head: "Sensitivity tiers", sources_head: "Provenance sources",
+    open_console: "Open the engine console →",
+    tier_1: "internal", tier_2: "confidential", tier_3: "restricted", tier_0: "public",
     raw_stats: "Raw engine counters",
     stats_unreachable: "Engine unreachable — counters unavailable.",
     danger_head: "Danger zone",
@@ -187,6 +212,10 @@ const I18N = {
     conn_head: "エンジン接続",
     conn_ok: "接続済み", conn_bad: "到達不能",
     facts_label: "ファクト（durable head）", nodes_label: "ノード",
+    types_label: "型", preds_label: "述語", uptime_label: "エンジン稼働時間", wal_label: "WAL サイズ",
+    comp_head: "グラフの組成", labels_head: "機密度ティア", sources_head: "provenance ソース",
+    open_console: "エンジンコンソールを開く →",
+    tier_1: "internal", tier_2: "confidential", tier_3: "restricted", tier_0: "public",
     raw_stats: "エンジンカウンター（生値）",
     stats_unreachable: "エンジンに到達できません — カウンターは取得できません。",
     danger_head: "危険な操作",
@@ -206,6 +235,10 @@ const I18N = {
     conn_head: "引擎连接",
     conn_ok: "已连接", conn_bad: "无法访问",
     facts_label: "事实（durable head）", nodes_label: "节点",
+    types_label: "类型", preds_label: "谓词", uptime_label: "引擎运行时间", wal_label: "WAL 大小",
+    comp_head: "图谱构成", labels_head: "敏感度层级", sources_head: "来源（provenance）",
+    open_console: "打开引擎控制台 →",
+    tier_1: "internal", tier_2: "confidential", tier_3: "restricted", tier_0: "public",
     raw_stats: "引擎原始计数",
     stats_unreachable: "无法访问引擎 — 计数不可用。",
     danger_head: "危险区域",
@@ -288,20 +321,42 @@ async function refreshStatus() {
   }
   renderEngine();
 }
+const fmtUptime = (s) => s >= 86400 ? `${Math.floor(s/86400)}d ${Math.floor(s%86400/3600)}h` : s >= 3600 ? `${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m` : `${Math.floor(s/60)}m`;
+const fmtBytes = (b) => b >= 1048576 ? `${(b/1048576).toFixed(1)} MB` : `${Math.round(b/1024)} KB`;
+
 async function refreshStats() {
   try {
-    const j = await jf("/api/stroma-stats");
+    const j = await jf("/api/sink/info");
     if (!j.reachable) {
-      $("#factsV").textContent = "—"; $("#nodesV").textContent = "—";
+      for (const id of ["factsV","nodesV","typesV","predsV","uptimeV","walV"]) $("#"+id).textContent = "—";
       $("#rawStats").textContent = t("stats_unreachable");
       return;
     }
     const st = j.stats ?? {};
     $("#factsV").textContent = String(st.facts?.durable_head ?? 0);
     $("#nodesV").textContent = String(st.schema?.nodes ?? 0);
+    $("#typesV").textContent = String(st.schema?.types ?? 0);
+    $("#predsV").textContent = String(st.schema?.predicates ?? 0);
+    $("#uptimeV").textContent = st.server ? fmtUptime(st.server.uptime_seconds ?? 0) : "—";
+    $("#walV").textContent = fmtBytes(st.storage?.wal_bytes ?? 0);
+    $("#engVer").textContent = st.server?.version ? `stroma-db v${st.server.version}` : "";
+    // graph composition: type × count with proportional bars (from the overview op)
+    const comp = j.composition ?? [];
+    const max = Math.max(1, ...comp.map((c) => c.count));
+    $("#compRows").innerHTML = comp.map((c) => `
+      <div class="crow"><span>${esc(c.type)}</span>
+        <span class="cbar"><i style="width:${Math.max(2, Math.round(c.count / max * 100))}%"></i></span>
+        <span class="cn">${c.count}</span></div>`).join("") || "—";
+    // sensitivity tiers: label value → tier name where known
+    const labels = st.labels ?? {};
+    $("#labelChips").innerHTML = Object.entries(labels).map(([l, n]) =>
+      `<span class="chip">${esc(I18N[LANG]["tier_" + l] ?? "L" + l)} <b>${n}</b></span>`).join("") || "—";
+    // provenance sources
+    $("#sourceChips").innerHTML = (st.sources ?? []).map((s) => `<span class="chip">${esc(s)}</span>`).join("") || "—";
+    const link = $("#consoleLink"); if (link && j.url) link.href = j.url;
     $("#rawStats").textContent = JSON.stringify(st, null, 2);
   } catch (e) {
-    $("#factsV").textContent = "—"; $("#nodesV").textContent = "—";
+    for (const id of ["factsV","nodesV","typesV","predsV","uptimeV","walV"]) $("#"+id).textContent = "—";
     $("#rawStats").textContent = e.status === 401 ? "unauthorized" : t("err_request", { e: e.message });
   }
 }
