@@ -5,7 +5,7 @@
 
 import express from "express";
 import { Stroma } from "../stroma.ts";
-import { confirmIdentity, findCandidates, type Candidate } from "../identities.ts";
+import { confirmIdentity, findCandidates, selectEmailExact, type Candidate } from "../identities.ts";
 import { loadConfig, saveConfig } from "../etl/store.ts";
 
 export const identitiesRouter = express.Router();
@@ -65,6 +65,30 @@ identitiesRouter.post("/api/identities/resolve", async (req, res) => {
     }
     await confirmIdentity(db, { a, b, reviewer, note });
     res.json({ ok: true, a, b, decision, reviewer });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// POST /api/identities/confirm-all-email → { reviewer? }. One human verdict over one evidence
+// class: every open exact-email candidate gets the exact per-pair ingest an individual confirm
+// does (confirmIdentity: symmetric same-as + review facts, identity-review provenance). Dismissed
+// and already-confirmed pairs are skipped; name-token candidates are untouched. A separate route
+// rather than a /resolve extension: /resolve is shaped around one {a, b, decision} verdict, while
+// this action takes no pair and answers with a count.
+identitiesRouter.post("/api/identities/confirm-all-email", async (req, res) => {
+  try {
+    const reviewer = (req.body?.reviewer as string | undefined) ?? "reviewer";
+    const db = new Stroma();
+    if (!(await db.health())) {
+      return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
+    }
+    const dismissed = loadConfig().dismissedIdentityPairs ?? [];
+    const targets = selectEmailExact(await findCandidates(db), dismissed);
+    for (const c of targets) {
+      await confirmIdentity(db, { a: c.a.id, b: c.b.id, reviewer });
+    }
+    res.json({ ok: true, confirmed: targets.length, reviewer });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
