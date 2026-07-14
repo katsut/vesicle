@@ -27,6 +27,7 @@ import { dirname, resolve } from "node:path";
 import { restorePipelines } from "./poller.ts";
 import { backlogRouter, backlogWebhookRouter } from "./routes/backlog.ts";
 import { gdriveRouter } from "./routes/gdrive.ts";
+import { identitiesRouter } from "./routes/identities.ts";
 import { modelRouter } from "./routes/model.ts";
 import { pipelinesRouter } from "./routes/pipelines.ts";
 
@@ -104,6 +105,7 @@ app.post("/api/logout", (req, res) => {
 });
 
 app.use(pipelinesRouter); // /api/status, /api/stroma-stats, /api/sink/reset, /api/pipelines, /api/conformance*
+app.use(identitiesRouter); // /api/identities/*
 app.use(backlogRouter); // /api/backlog/*
 app.use(gdriveRouter); // /api/gdrive/*
 

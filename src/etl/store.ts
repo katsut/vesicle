@@ -80,6 +80,9 @@ export interface ConnectorConfig {
   pipelines: PipelineDef[];
   /** run history, most-recent first, capped at RUNS_CAP */
   runs: PipelineRun[];
+  /** identity candidate pairs a human dismissed, each ordered [low, high] — the candidates endpoint
+   *  keeps proposing everything else (a non-identity is not a graph fact, so it lives here) */
+  dismissedIdentityPairs?: Array<[number, number]>;
 }
 
 /** How many runs the store keeps (append via recordRun evicts the oldest beyond this). */
@@ -115,6 +118,7 @@ export function loadConfig(): ConnectorConfig {
     mappings: raw.mappings ?? {},
     pipelines: raw.pipelines ?? [],
     runs: raw.runs ?? [],
+    dismissedIdentityPairs: raw.dismissedIdentityPairs ?? [],
   };
   return cache;
 }
