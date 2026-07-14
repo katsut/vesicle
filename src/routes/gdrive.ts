@@ -12,6 +12,7 @@ import { evaluateSharing, recordSharingReview, type SharingDecision } from "../a
 import { callLLM, extractJson } from "../llm.ts";
 import { Stroma } from "../stroma.ts";
 import { repairLateArrivals } from "../etl/guard.ts";
+import { mapPool } from "../etl/pool.ts";
 import { loadConfig, recordRun, saveConfig, type PipelineDef } from "../etl/store.ts";
 import { sink, guardDb, logRepairs } from "../runtime.ts";
 import { POLL_MS, pipelineById, pollTimers, registerPollHandler, startPoller, stopPoller } from "../poller.ts";
@@ -87,6 +88,12 @@ function parseDriveScope(scope: string | undefined): DriveScope | null {
 const driveScopeLabel = (s: DriveScope): string =>
   s.kind === "my-drive" ? "My Drive" : s.kind === "folder" ? `folder ${s.id}` : `drive ${s.id}`;
 
+// The initial listing's wall clock is per-file Drive API round-trips (hydrateFile fetches
+// permissions per file on shared drives), so a page's files are hydrated+ingested with bounded
+// concurrency. The engine serializes writes behind its write mutex, and the guard's point-read →
+// ingest ordering is closed within each file, so cross-file concurrency is safe.
+const LISTING_CONCURRENCY = 8;
+
 /** Hydrate (resolve shortcut, fetch missing ACL) → map → guarded ingest. Returns facts written. */
 async function ingestDriveFile(cfg: GdriveApiConfig, file: DriveFile, pipelineId: string): Promise<number> {
   const batch = driveFileToBatch(await hydrateFile(cfg, file));
@@ -139,8 +146,10 @@ async function pollOnceGdrive(pipelineId: string): Promise<void> {
       let pageToken: string | undefined;
       do {
         const page = await listFiles(cfg, { scope, pageToken });
-        let pageFacts = 0;
-        for (const f of page.files) pageFacts += await ingestDriveFile(cfg, f, pipelineId);
+        // A failure still aborts the cycle exactly like the sequential loop did (mapPool rejects
+        // → outer catch → lastError); the counter persists only after the whole page completes.
+        const counts = await mapPool(page.files, LISTING_CONCURRENCY, (f) => ingestDriveFile(cfg, f, pipelineId));
+        const pageFacts = counts.reduce((a, b) => a + b, 0);
         files += page.files.length;
         facts += pageFacts;
         pageToken = page.nextPageToken;
