@@ -156,6 +156,8 @@
     <div class="chips" id="labelChips">—</div>
     <div class="syshead" data-i18n="sources_head"></div>
     <div class="chips" id="sourceChips">—</div>
+    <div class="syshead" data-i18n="compression_head"></div>
+    <div class="chips" id="laneChips">—</div>
     <div class="conlink"><a id="consoleLink" target="_blank" rel="noopener" data-i18n="open_console"></a> <span id="engVer" style="color:var(--ink-dim);font-size:12px"></span></div>
     <details class="raw"><summary data-i18n="raw_stats"></summary><pre id="rawStats">—</pre></details>
   </div>
@@ -191,6 +193,8 @@ const I18N = {
     facts_label: "Facts (durable head)", nodes_label: "Nodes",
     types_label: "Types", preds_label: "Predicates", uptime_label: "Engine uptime", wal_label: "WAL size",
     comp_head: "Graph composition", labels_head: "Sensitivity tiers", sources_head: "Provenance sources",
+    compression_head: "Compression",
+    lane_observed: "{n} observed", lane_facts: "{n} facts", lane_skipped: "{n} no-ops skipped",
     open_console: "Open the engine console →",
     tier_1: "internal", tier_2: "confidential", tier_3: "restricted", tier_0: "public",
     raw_stats: "Raw engine counters",
@@ -214,6 +218,8 @@ const I18N = {
     facts_label: "ファクト（durable head）", nodes_label: "ノード",
     types_label: "型", preds_label: "述語", uptime_label: "エンジン稼働時間", wal_label: "WAL サイズ",
     comp_head: "グラフの組成", labels_head: "機密度ティア", sources_head: "provenance ソース",
+    compression_head: "圧縮",
+    lane_observed: "{n} 件観測", lane_facts: "{n} ファクト", lane_skipped: "no-op {n} 件スキップ",
     open_console: "エンジンコンソールを開く →",
     tier_1: "internal", tier_2: "confidential", tier_3: "restricted", tier_0: "public",
     raw_stats: "エンジンカウンター（生値）",
@@ -237,6 +243,8 @@ const I18N = {
     facts_label: "事实（durable head）", nodes_label: "节点",
     types_label: "类型", preds_label: "谓词", uptime_label: "引擎运行时间", wal_label: "WAL 大小",
     comp_head: "图谱构成", labels_head: "敏感度层级", sources_head: "来源（provenance）",
+    compression_head: "压缩",
+    lane_observed: "观测 {n} 条", lane_facts: "事实 {n} 条", lane_skipped: "跳过 {n} 次无变更写入",
     open_console: "打开引擎控制台 →",
     tier_1: "internal", tier_2: "confidential", tier_3: "restricted", tier_0: "public",
     raw_stats: "引擎原始计数",
@@ -353,6 +361,14 @@ async function refreshStats() {
       `<span class="chip">${esc(I18N[LANG]["tier_" + l] ?? "L" + l)} <b>${n}</b></span>`).join("") || "—";
     // provenance sources
     $("#sourceChips").innerHTML = (st.sources ?? []).map((s) => `<span class="chip">${esc(s)}</span>`).join("") || "—";
+    // compression: per lane, source units observed vs facts produced (parts without a value are omitted)
+    $("#laneChips").innerHTML = (j.lanes ?? []).map((l) => {
+      const ratio = l.observed != null
+        ? `${t("lane_observed", { n: l.observed })} → ${t("lane_facts", { n: l.facts })}`
+        : t("lane_facts", { n: l.facts });
+      const skipped = l.suppressed != null ? ` (${t("lane_skipped", { n: l.suppressed })})` : "";
+      return `<span class="chip"><b>${esc(l.name)}</b>: ${ratio}${skipped}</span>`;
+    }).join("") || "—";
     const link = $("#consoleLink"); if (link && j.url) link.href = j.url;
     $("#rawStats").textContent = JSON.stringify(st, null, 2);
   } catch (e) {

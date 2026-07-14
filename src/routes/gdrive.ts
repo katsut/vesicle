@@ -13,6 +13,7 @@ import { callLLM, extractJson } from "../llm.ts";
 import { Stroma } from "../stroma.ts";
 import { repairLateArrivals } from "../etl/guard.ts";
 import { mapPool } from "../etl/pool.ts";
+import { suppressedOf } from "../etl/sink.ts";
 import { loadConfig, recordRun, saveConfig, type PipelineDef } from "../etl/store.ts";
 import { sink, guardDb, logRepairs } from "../runtime.ts";
 import { POLL_MS, pipelineById, pollTimers, registerPollHandler, startPoller, stopPoller } from "../poller.ts";
@@ -509,6 +510,7 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
     const startedAt = Date.now();
     const results: Array<{ fileId: string; name: string; ok: boolean; facts: number; error?: string }> = [];
     let totalFacts = 0;
+    let suppressed: number | undefined; // engine no-op count, summed over the run's ingests
     // Revisions extracted under one logicalDocId share claim identity by entity NAME (#58), so each
     // later file's prompt carries the names already minted — naming drift across revisions is what
     // splits one provision into two nodes (#64). Seeded from the family anchor's persisted keys, so
@@ -546,8 +548,10 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
         });
         // Guarded like every lane: extracting an OLDER revision after a newer one (the #58 logical
         // key's whole point) must not leave the superseded wording at head (head = arrival order).
-        const { repairs } = await repairLateArrivals(guardDb, sink, batch.items, { pipelineId: GDRIVE_EXTRACT_ID });
+        const { stats, repairs } = await repairLateArrivals(guardDb, sink, batch.items, { pipelineId: GDRIVE_EXTRACT_ID });
         logRepairs(GDRIVE_EXTRACT_ID, repairs);
+        const skipped = suppressedOf(stats);
+        if (skipped != null) suppressed = (suppressed ?? 0) + skipped;
         for (const k of batch.newEntityKeys) familyBaseline.add(k); // persisted — later files skip them
         totalFacts += batch.factCount;
         results.push({ fileId, name, ok: true, facts: batch.factCount });
@@ -565,6 +569,7 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
       finishedAt: Date.now(),
       events: results.length,
       facts: totalFacts,
+      suppressed,
       error: failed.length ? `${failed.length}/${results.length} files failed: ${failed[0]!.error}` : null,
     });
     res.json({ ok: !failed.length, results, facts: totalFacts });
