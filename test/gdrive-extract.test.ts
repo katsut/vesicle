@@ -174,6 +174,65 @@ test("claimsToBatch: no floors → no requires-floor fact (and no def)", () => {
   assert.ok(!items.some((i) => "pred_def" in i && i.pred_def.name === "requires-floor"));
 });
 
+test("claimsToBatch: every minted entity gets a <type>-name fact, with a display pred_def", () => {
+  const claims: DocClaim[] = [
+    { subject: "Rule 4.2", subjectType: "Rule", predicate: "rule-title", object: "Expenses" },
+    { subject: "Rule 4.2", subjectType: "Rule", predicate: "in-section", object: "Section 4", objectType: "Section" },
+  ];
+  const modifiedTime = "2026-01-15T09:30:00Z";
+  const { items } = claimsToBatch({ fileId: FILE_ID, docLabel: 1, modifiedTime, pattern: PATTERN, claims, model: modelWithFloors({}) });
+  const facts = factsOf(items);
+  const ruleName = facts.find((f) => f.predicate === "rule-name");
+  assert.ok(ruleName, "rule-name fact missing");
+  assert.equal(ruleName!.subject, claimNid(FILE_ID, "Rule", "Rule 4.2"));
+  assert.deepEqual(ruleName!.object, { text: "Rule 4.2" });
+  assert.equal(ruleName!.valid_from, Math.floor(Date.parse(modifiedTime) / 1000));
+  assert.equal(ruleName!.source, `drive:${FILE_ID}`);
+  for (const t of ["Rule", "Section"]) {
+    const d = items.find((i) => "pred_def" in i && i.pred_def.name === `${t.toLowerCase()}-name`);
+    assert.ok(d && "pred_def" in d, `${t.toLowerCase()}-name pred_def missing`);
+    assert.equal(d.pred_def.cardinality, "one");
+    assert.equal(d.pred_def.domain, t);
+    assert.equal(d.pred_def.range_value, "text");
+    assert.equal(d.pred_def.display, true);
+  }
+});
+
+test("claimsToBatch: a pattern-declared <type>-name predicate suppresses the auto def and fact", () => {
+  const pattern: DocPattern = {
+    entity_types: ["Person", "Team"],
+    predicates: [
+      { name: "person-name", from: "Person", to: "text", kind: "value", card: "one", display: true },
+      { name: "member-of", from: "Person", to: "Team", kind: "edge", card: "one" },
+    ],
+  };
+  const claims: DocClaim[] = [
+    { subject: "alice@example.com", subjectType: "Person", predicate: "person-name", object: "Alice" },
+    { subject: "alice@example.com", subjectType: "Person", predicate: "member-of", object: "Platform", objectType: "Team" },
+  ];
+  const { items } = claimsToBatch({ fileId: FILE_ID, docLabel: 1, pattern, claims, model: modelWithFloors({}) });
+  assert.equal(items.filter((i) => "pred_def" in i && i.pred_def.name === "person-name").length, 1); // the pattern's own only
+  const personNames = factsOf(items).filter((f) => f.predicate === "person-name");
+  assert.equal(personNames.length, 1); // the extracted claim only — no auto fact
+  assert.deepEqual(personNames[0]!.object, { text: "Alice" });
+  // Team declares no team-name → the auto def/fact still applies there
+  const teamName = factsOf(items).find((f) => f.predicate === "team-name");
+  assert.ok(teamName, "team-name fact missing");
+  assert.deepEqual(teamName!.object, { text: "Platform" });
+});
+
+test("claimsToBatch: an entity reached only as an edge target still gets a name fact", () => {
+  const claims: DocClaim[] = [
+    { subject: "Rule 1", subjectType: "Rule", predicate: "in-section", object: "Section 9", objectType: "Section" },
+  ];
+  const { items, factCount } = claimsToBatch({ fileId: FILE_ID, docLabel: 1, pattern: PATTERN, claims, model: modelWithFloors({}) });
+  const sectionName = factsOf(items).find((f) => f.predicate === "section-name");
+  assert.ok(sectionName, "section-name fact missing");
+  assert.equal(sectionName!.subject, claimNid(FILE_ID, "Section", "Section 9"));
+  assert.deepEqual(sectionName!.object, { text: "Section 9" });
+  assert.equal(factCount, factsOf(items).length); // name facts count like every other batch fact
+});
+
 // --- model-output parsing -----------------------------------------------------------------------------
 
 test("parseClaims: drops out-of-pattern facts, defaults types, keeps effectiveFrom", () => {
