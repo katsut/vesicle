@@ -110,6 +110,18 @@ export interface GdriveBatch {
   factCount: number;
 }
 
+/** Name a shared drive's root Folder node. The root only ever appears as a parent-folder /
+ *  in-folder endpoint (the Files API never lists it), so without this batch it renders as a bare
+ *  node id. */
+export function driveRootBatch(driveId: string, driveName: string, at: number): BatchItem[] {
+  const root = nid("Folder", driveId);
+  return [
+    ...SCHEMA,
+    { node: { id: root, type: "Folder" } },
+    { fact: { subject: root, predicate: "folder-name", object: { text: driveName }, valid_from: at } },
+  ];
+}
+
 /** A person's stable key: Google permissionId when present, else the email. Null = unmappable. */
 const personKey = (u: { permissionId?: string; id?: string; emailAddress?: string }): string | null =>
   u.permissionId ?? u.id ?? u.emailAddress ?? null;

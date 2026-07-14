@@ -4,8 +4,8 @@
 import express from "express";
 import { randomBytes } from "node:crypto";
 import { authorizeUrl as gdriveAuthorizeUrl, exchangeCode as gdriveExchangeCode, refreshToken as refreshGoogleToken } from "../gdrive-oauth.ts";
-import { DOC_MIME, PDF_MIME, SLIDES_MIME, WORD_MIME, downloadFile, exportDoc, exportPdf, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "../gdrive-api.ts";
-import { driveFileToBatch, sensitivityLabel } from "../gdrive.ts";
+import { DOC_MIME, PDF_MIME, SLIDES_MIME, WORD_MIME, downloadFile, exportDoc, exportPdf, getDrive, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "../gdrive-api.ts";
+import { driveFileToBatch, driveRootBatch, sensitivityLabel } from "../gdrive.ts";
 import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, entityNamesOf, extractClaims, parseKnownEntities, readFamilyEntityKeys, type DocContent, type DocPattern } from "../gdrive-extract.ts";
 import { docxToText } from "../docx.ts";
 import { evaluateSharing, recordSharingReview, type SharingDecision } from "../access-conformance.ts";
@@ -125,6 +125,17 @@ async function pollOnceGdrive(pipelineId: string): Promise<void> {
       // persist per page; a crash mid-walk restarts the listing (idempotent — deterministic ids,
       // re-emitted facts supersede in place).
       const startToken = await getStartPageToken(cfg, driveId);
+      if (scope.kind === "drive") {
+        // the root never appears in the listing itself — name its Folder node once per listing
+        try {
+          const drive = await getDrive(cfg, scope.id);
+          const { repairs } = await repairLateArrivals(guardDb, sink, driveRootBatch(scope.id, drive.name, Date.now()), { pipelineId });
+          logRepairs(pipelineId, repairs);
+          facts += 1;
+        } catch (e) {
+          console.log(`  gdrive: could not name drive root ${scope.id}: ${(e as Error).message}`);
+        }
+      }
       let pageToken: string | undefined;
       do {
         const page = await listFiles(cfg, { scope, pageToken });

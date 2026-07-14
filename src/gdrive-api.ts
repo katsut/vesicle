@@ -205,6 +205,12 @@ export async function listDrives(cfg: GdriveApiConfig): Promise<SharedDrive[]> {
   return out;
 }
 
+/** One shared drive's metadata — used to name the drive's root Folder node. */
+export async function getDrive(cfg: GdriveApiConfig, driveId: string): Promise<SharedDrive> {
+  const p = new URLSearchParams({ fields: "id,name" });
+  return (await get(cfg, `/drives/${driveId}`, p, "get drive")) as SharedDrive;
+}
+
 /** A Google Doc's body exported as plain text (a Doc has no downloadable bytes — export converts).
  *  Google caps exports at 10 MB of converted content; over-cap and permission errors surface as-is. */
 export async function exportDoc(cfg: GdriveApiConfig, fileId: string): Promise<string> {
