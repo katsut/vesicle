@@ -25,6 +25,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { restorePipelines } from "./poller.ts";
+import { approvalsRouter } from "./routes/approvals.ts";
 import { backlogRouter, backlogWebhookRouter } from "./routes/backlog.ts";
 import { gdriveRouter } from "./routes/gdrive.ts";
 import { identitiesRouter } from "./routes/identities.ts";
@@ -106,6 +107,7 @@ app.post("/api/logout", (req, res) => {
 
 app.use(pipelinesRouter); // /api/status, /api/stroma-stats, /api/sink/reset, /api/pipelines, /api/conformance*
 app.use(identitiesRouter); // /api/identities/*
+app.use(approvalsRouter); // /api/approvals/*
 app.use(backlogRouter); // /api/backlog/*
 app.use(gdriveRouter); // /api/gdrive/*
 
