@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { authorizeUrl as gdriveAuthorizeUrl, exchangeCode as gdriveExchangeCode, refreshToken as refreshGoogleToken } from "../gdrive-oauth.ts";
 import { DOC_MIME, PDF_MIME, SLIDES_MIME, WORD_MIME, downloadFile, exportDoc, exportPdf, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "../gdrive-api.ts";
 import { driveFileToBatch, sensitivityLabel } from "../gdrive.ts";
-import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, entityNamesOf, extractClaims, type DocContent, type DocPattern } from "../gdrive-extract.ts";
+import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, entityNamesOf, extractClaims, parseKnownEntities, readFamilyEntityKeys, type DocContent, type DocPattern } from "../gdrive-extract.ts";
 import { docxToText } from "../docx.ts";
 import { evaluateSharing, recordSharingReview, type SharingDecision } from "../access-conformance.ts";
 import { callLLM, extractJson } from "../llm.ts";
@@ -490,9 +490,16 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
     const results: Array<{ fileId: string; name: string; ok: boolean; facts: number; error?: string }> = [];
     let totalFacts = 0;
     // Revisions extracted under one logicalDocId share claim identity by entity NAME (#58), so each
-    // later file's prompt carries the names already minted in this request — naming drift across
-    // revisions is what splits one provision into two nodes (#64).
+    // later file's prompt carries the names already minted — naming drift across revisions is what
+    // splits one provision into two nodes (#64). Seeded from the family anchor's persisted keys, so
+    // reuse survives request boundaries (#67); the baseline keeps the anchor writes new-names-only.
     const knownEntities: Record<string, string[]> = {};
+    const familyBaseline = new Set<string>();
+    if (logicalDocId) {
+      const keys = await readFamilyEntityKeys(guardDb, logicalDocId);
+      for (const k of keys) familyBaseline.add(k);
+      Object.assign(knownEntities, parseKnownEntities(keys));
+    }
     for (const fileId of fileIds) {
       let name = fileId;
       try {
@@ -515,11 +522,13 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
           pattern,
           claims,
           model,
+          familyBaseline,
         });
         // Guarded like every lane: extracting an OLDER revision after a newer one (the #58 logical
         // key's whole point) must not leave the superseded wording at head (head = arrival order).
         const { repairs } = await repairLateArrivals(guardDb, sink, batch.items, { pipelineId: GDRIVE_EXTRACT_ID });
         logRepairs(GDRIVE_EXTRACT_ID, repairs);
+        for (const k of batch.newEntityKeys) familyBaseline.add(k); // persisted — later files skip them
         totalFacts += batch.factCount;
         results.push({ fileId, name, ok: true, facts: batch.factCount });
         console.log(`  gdrive extract: "${name}" → ${batch.factCount} facts (${batch.entityCount} entities${batch.requiresFloor != null ? `, requires-floor ${batch.requiresFloor}` : ""})`);
