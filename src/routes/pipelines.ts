@@ -40,6 +40,30 @@ pipelinesRouter.get("/api/stroma-stats", async (_req, res) => {
   }
 });
 
+// The Sink page's system panel: /stats verbatim (server identity, catalog, label tiers, provenance
+// sources) plus the overview op's type×count composition — one composed payload, engine-derived.
+pipelinesRouter.get("/api/sink/info", async (_req, res) => {
+  try {
+    const url = process.env.STROMA_URL ?? "http://127.0.0.1:7687";
+    const stats = await sink.stats();
+    if (!stats) return res.json({ reachable: false, url });
+    let composition: Array<{ type: string; count: number }> = [];
+    try {
+      const db = new Stroma();
+      await db.ensureAuthed();
+      const ov = (await db.query({ op: "overview" })) as { nodes?: Array<{ name?: string; count?: number }> };
+      composition = (ov.nodes ?? [])
+        .map((n) => ({ type: n.name ?? "?", count: n.count ?? 0 }))
+        .sort((a, b) => b.count - a.count);
+    } catch (e) {
+      console.log(`  /api/sink/info: overview unavailable: ${(e as Error).message}`);
+    }
+    res.json({ reachable: true, url, stats, composition });
+  } catch (e) {
+    res.json({ reachable: false, error: (e as Error).message });
+  }
+});
+
 // Admin: wipe the engine database. Deliberately NOT part of any ingest path — every pipeline loads
 // incrementally; this is the one explicit destructive action (the sink settings surface calls it).
 // Requires { confirm: true } so a stray call can't clear the graph. No-op if the engine runs without
