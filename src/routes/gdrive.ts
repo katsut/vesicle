@@ -446,7 +446,12 @@ Rules:
 
 FILES:
 ${JSON.stringify(meta)}`;
-    const text = await callLLM(prompt, { timeoutMs: 240_000, maxTokens: 4096 });
+    const text = await callLLM(prompt, {
+      timeoutMs: 240_000,
+      maxTokens: 4096,
+      // metadata classification is Haiku-shaped work; extraction keeps the strong default model
+      model: process.env.VESICLE_TRIAGE_MODEL ?? "claude-haiku-4-5",
+    });
     const parsed = extractJson(text) as { files?: Array<{ id?: string; category?: string; select?: boolean; reason?: string }> };
     const known = new Set(files.map((f) => f.id));
     const out = (parsed.files ?? [])

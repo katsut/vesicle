@@ -29,7 +29,7 @@ export function activeBackend(): Backend {
   return process.env.ANTHROPIC_API_KEY ? "api" : "cli";
 }
 
-async function viaApi(prompt: string, timeoutMs: number, maxTokens: number, pdfBase64?: string): Promise<string> {
+async function viaApi(prompt: string, timeoutMs: number, maxTokens: number, model: string, pdfBase64?: string): Promise<string> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const content = pdfBase64
@@ -47,7 +47,7 @@ async function viaApi(prompt: string, timeoutMs: number, maxTokens: number, pdfB
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         max_tokens: maxTokens,
         messages: [{ role: "user", content }],
       }),
@@ -61,9 +61,9 @@ async function viaApi(prompt: string, timeoutMs: number, maxTokens: number, pdfB
   }
 }
 
-function viaCli(prompt: string, timeoutMs: number, cwd?: string): Promise<string> {
+function viaCli(prompt: string, timeoutMs: number, model: string, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn("claude", ["-p", "--model", MODEL], { stdio: ["pipe", "pipe", "pipe"], cwd });
+    const child = spawn("claude", ["-p", "--model", model], { stdio: ["pipe", "pipe", "pipe"], cwd });
     let out = "";
     let err = "";
     const timer = setTimeout(() => {
@@ -83,12 +83,12 @@ function viaCli(prompt: string, timeoutMs: number, cwd?: string): Promise<string
   });
 }
 
-async function viaCliWithPdf(prompt: string, timeoutMs: number, pdfBase64: string): Promise<string> {
+async function viaCliWithPdf(prompt: string, timeoutMs: number, model: string, pdfBase64: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "vesicle-doc-"));
   try {
     await writeFile(join(dir, "doc.pdf"), Buffer.from(pdfBase64, "base64"));
     const full = `Read the PDF file @doc.pdf in your working directory — it is the attached DOCUMENT the instructions below refer to.\n\n${prompt}`;
-    return await viaCli(full, timeoutMs, dir);
+    return await viaCli(full, timeoutMs, model, dir);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -96,12 +96,15 @@ async function viaCliWithPdf(prompt: string, timeoutMs: number, pdfBase64: strin
 
 export function callLLM(
   prompt: string,
-  opts: { timeoutMs?: number; maxTokens?: number; pdfBase64?: string } = {},
+  opts: { timeoutMs?: number; maxTokens?: number; pdfBase64?: string; model?: string } = {},
 ): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const maxTokens = opts.maxTokens ?? 2048;
-  if (activeBackend() === "api") return viaApi(prompt, timeoutMs, maxTokens, opts.pdfBase64);
-  return opts.pdfBase64 ? viaCliWithPdf(prompt, timeoutMs, opts.pdfBase64) : viaCli(prompt, timeoutMs);
+  // per-call override: classification-shaped calls (funnel triage) run on a small fast model,
+  // extraction stays on the strong default
+  const model = opts.model ?? MODEL;
+  if (activeBackend() === "api") return viaApi(prompt, timeoutMs, maxTokens, model, opts.pdfBase64);
+  return opts.pdfBase64 ? viaCliWithPdf(prompt, timeoutMs, model, opts.pdfBase64) : viaCli(prompt, timeoutMs, model);
 }
 
 /** Extract the first JSON object from model text (fenced ```json block or a bare {...}). */
