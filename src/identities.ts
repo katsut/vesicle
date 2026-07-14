@@ -87,6 +87,17 @@ export function pairPersons(persons: PersonInfo[]): CandidatePair[] {
   return pairs;
 }
 
+/** Pure selection for the one-click bulk confirm (pairs sharing a normalized email carry identical,
+ *  strong evidence — reviewing them one by one adds nothing): exact-email candidates that are still
+ *  open, i.e. not confirmed and not dismissed. Name-token candidates never qualify — that evidence
+ *  tier is reviewed pair by pair. Candidates arrive ordered a.id < b.id (pairPersons), matching the
+ *  canonical low-high dismissed-pair keys. */
+export function selectEmailExact(candidates: Candidate[], dismissed: ReadonlyArray<[number, number]>): Candidate[] {
+  return candidates.filter(
+    (c) => c.evidence === "email" && !c.confirmed && !dismissed.some(([lo, hi]) => lo === c.a.id && hi === c.b.id),
+  );
+}
+
 /** A text property out of the node-detail response ({props: [{predicate, card, value|values}]}).
  *  Tolerant of the value arriving wrapped ({text: …}) or as a bare string. */
 function propText(detail: Record<string, unknown>, predicate: string): string | null {

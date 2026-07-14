@@ -112,6 +112,8 @@
   .idstate.ok{color:var(--good);border-color:color-mix(in oklab,var(--good) 36%,var(--line));background:color-mix(in oklab,var(--good) 9%,var(--panel-2))}
   .cardin.strong{color:var(--accent-2);border-color:color-mix(in oklab,var(--accent) 36%,var(--line));background:color-mix(in oklab,var(--accent) 9%,var(--panel-2))}
   .snip{color:var(--mut);font-size:12.5px}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);z-index:40;background:var(--panel);color:var(--fg);border:1px solid color-mix(in oklab,var(--good) 36%,var(--line));border-radius:var(--r-sm);padding:10px 16px;font-size:13px;box-shadow:var(--bevel),var(--shadow);opacity:0;transition:opacity .18s,transform .18s;pointer-events:none}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -170,6 +172,8 @@ const I18N = {
     id_confirmed: "✓ confirmed", id_dismissed: "dismissed",
     id_empty: "no candidates",
     id_offline: "StromaDB is not reachable — candidate generation needs the engine.",
+    id_confirm_all: "Confirm all exact-email matches ({n})",
+    id_bulk_done: "Confirmed {n} exact-email matches",
     approvals_head: "Approvals",
     ap_tagline: "Deterministic approval candidates — comments whose text matches an approval phrase, no LLM involved. Confirm asserts approved-by / approved-at facts on the issue plus review facts; Dismiss only stops the candidate from being proposed.",
     th_issue: "issue", th_approver: "approver", th_date: "date",
@@ -214,6 +218,8 @@ const I18N = {
     id_confirmed: "✓ 確認済み", id_dismissed: "却下済み",
     id_empty: "候補はありません",
     id_offline: "StromaDB に接続できません — 候補の生成にはエンジンが必要です。",
+    id_confirm_all: "メール完全一致をすべて確認 ({n})",
+    id_bulk_done: "メール完全一致 {n} 組を確認しました",
     approvals_head: "承認",
     ap_tagline: "決定的な承認候補 — テキストが承認フレーズに一致したコメントで、LLM は使いません。「確認」は課題に approved-by / approved-at ファクトとレビューファクトを書き込み、「却下」はこの候補が提案されなくなるだけです。",
     th_issue: "課題", th_approver: "承認者", th_date: "日付",
@@ -258,6 +264,8 @@ const I18N = {
     id_confirmed: "✓ 已确认", id_dismissed: "已忽略",
     id_empty: "没有候选",
     id_offline: "无法连接 StromaDB — 生成候选需要引擎。",
+    id_confirm_all: "确认所有邮箱完全匹配 ({n})",
+    id_bulk_done: "已确认 {n} 组邮箱完全匹配",
     approvals_head: "审批",
     ap_tagline: "确定性的审批候选 — 文本命中审批短语的评论，不使用 LLM。「确认」在议题上写入 approved-by / approved-at 事实及审核事实；「忽略」只是不再提议该候选。",
     th_issue: "议题", th_approver: "审批人", th_date: "日期",
@@ -432,7 +440,25 @@ function render() {
 // --- Identities: cross-source Person duplicate candidates (GET /api/identities/candidates).
 // Rows are pre-sorted by the server: unresolved first (email evidence before name), confirmed next,
 // dismissed last (rendered dimmed). Confirm/Dismiss POST /api/identities/resolve, then reload.
+// Exact-email pairs carry identical strong evidence, so the section header offers a one-click
+// "confirm all" (POST /api/identities/confirm-all-email) — the click itself is the verdict, a
+// toast reports the count. Name-token candidates stay individual.
 let IDS = { kind: "loading" };
+
+let toastTimer = null;
+function toast(msg) {
+  let el = $("#toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "toast"; el.className = "toast";
+    el.setAttribute("role", "status");
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 3200);
+}
 
 function personCell(p) {
   const email = p.email ? ` <span style="color:var(--mut)">(${esc(p.email)})</span>` : "";
@@ -453,7 +479,11 @@ function idRow(c) {
 
 function renderIdentities() {
   const el = $("#identities"); if (!el) return;
-  const head = `<div class="streamhead"><h2>${t("identities_head")}</h2><div class="bar"></div></div>
+  const nBulk = IDS.kind === "data"
+    ? IDS.candidates.filter((c) => c.evidence === "email" && !c.confirmed && !c.dismissed).length : 0;
+  const bulkBtn = nBulk
+    ? `<button class="rowbtn" data-act="confirm-all-email">${esc(t("id_confirm_all", { n: nBulk }))}</button>` : "";
+  const head = `<div class="streamhead"><h2>${t("identities_head")}</h2><div class="bar"></div>${bulkBtn}</div>
     <p class="tagline" style="margin:0 0 12px">${esc(t("id_tagline"))}</p>`;
   if (IDS.kind === "loading") { el.innerHTML = head + `<div class="loading">${t("loading")}</div>`; return; }
   if (IDS.kind === "offline") { el.innerHTML = head + `<div class="empty">${esc(t("id_offline"))}</div>`; return; }
@@ -480,21 +510,31 @@ async function loadIdentities() {
   renderIdentities();
 }
 
-// Confirm/Dismiss (event delegation): the reviewer defaults to the signed-in user shown in the
-// topbar, else "reviewer" — no prompt, the verdict itself is the interaction.
+// Confirm/Dismiss/Confirm-all (event delegation): the reviewer defaults to the signed-in user
+// shown in the topbar, else "reviewer" — no prompt, the verdict itself is the interaction.
 $("#identities").addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button[data-act]");
   if (!btn) return;
   btn.disabled = true;
   const reviewer = $("#userPill").hidden ? "reviewer" : ($("#userName").textContent || "reviewer");
   try {
-    const r = await fetch("/api/identities/resolve", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ a: Number(btn.dataset.a), b: Number(btn.dataset.b), decision: btn.dataset.act, reviewer }),
-    });
-    if (!r.ok) {
+    if (btn.dataset.act === "confirm-all-email") {
+      const r = await fetch("/api/identities/confirm-all-email", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reviewer }),
+      });
       const j = await r.json().catch(() => null);
-      throw new Error((j && j.error) || `HTTP ${r.status}`);
+      if (!r.ok || !j) throw new Error((j && j.error) || `HTTP ${r.status}`);
+      toast(t("id_bulk_done", { n: j.confirmed }));
+    } else {
+      const r = await fetch("/api/identities/resolve", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ a: Number(btn.dataset.a), b: Number(btn.dataset.b), decision: btn.dataset.act, reviewer }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => null);
+        throw new Error((j && j.error) || `HTTP ${r.status}`);
+      }
     }
   } catch (e) {
     IDS = { kind: "error", message: e.message };
