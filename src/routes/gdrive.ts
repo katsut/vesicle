@@ -441,14 +441,15 @@ LOOKING FOR: ${intent}
 Rules:
 - "category": one short kebab-case label of what the file appears to be (e.g. "policy", "meeting-minutes", "report", "draft", "training", "other").
 - "select": true only when the file plausibly matches LOOKING FOR and is not a draft/superseded copy.
-- "reason": one short sentence naming the metadata cue (title wording, date, draft marker).
+- "reason": ONE terse clause (max ~8 words) naming the metadata cue.
 - Answer for EVERY file, same order. Output ONLY JSON: {"files":[{"id":"...","category":"...","select":true,"reason":"..."}]}
 
 FILES:
 ${JSON.stringify(meta)}`;
     const text = await callLLM(prompt, {
       timeoutMs: 240_000,
-      maxTokens: 4096,
+      // one entry per file: a 200-file listing needs ~20K output tokens (id + category + reason)
+      maxTokens: 24_576,
       // metadata classification is Haiku-shaped work; extraction keeps the strong default model
       model: process.env.VESICLE_TRIAGE_MODEL ?? "claude-haiku-4-5",
     });
