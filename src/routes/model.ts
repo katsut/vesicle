@@ -13,7 +13,7 @@ import type { TransformResult } from "../transform.ts";
 import { Stroma } from "../stroma.ts";
 import { planPayoff, runPayoff } from "../payoff.ts";
 import { checkDerivedPath, evaluateDerived } from "../deriveEval.ts";
-import type { IngestStats } from "../etl/sink.ts";
+import { suppressedOf, type IngestStats } from "../etl/sink.ts";
 import { loadConfig, recordRun, saveConfig } from "../etl/store.ts";
 import { additionsOf, appendToModel, bindingsOf, composeMapping, conflictsOf, type ModelAdditions } from "../model.ts";
 import type { DerivedRelation, Mapping } from "../types.ts";
@@ -237,7 +237,7 @@ modelRouter.post("/api/apply", async (req, res) => {
       recordRun({ pipelineId: "apply", kind: "one-shot", startedAt, finishedAt: Date.now(), events, facts: 0, error: (e as Error).message });
       throw e;
     }
-    recordRun({ pipelineId: "apply", kind: "one-shot", startedAt, finishedAt: Date.now(), events, facts, error: null });
+    recordRun({ pipelineId: "apply", kind: "one-shot", startedAt, finishedAt: Date.now(), events, facts, suppressed: suppressedOf(stats), error: null });
 
     const out: Record<string, unknown> = { stats, gaps: tr.gaps };
 

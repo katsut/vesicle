@@ -5,7 +5,7 @@ import express from "express";
 import { Stroma } from "../stroma.ts";
 import { review, type Rule } from "../conformance.ts";
 import { recordReview, type Decision } from "../review.ts";
-import { loadConfig } from "../etl/store.ts";
+import { laneMetrics, loadConfig } from "../etl/store.ts";
 import { sink } from "../runtime.ts";
 
 // Default decision-authority policy: a release must be approved by the manager of the assignee's
@@ -41,7 +41,8 @@ pipelinesRouter.get("/api/stroma-stats", async (_req, res) => {
 });
 
 // The Sink page's system panel: /stats verbatim (server identity, catalog, label tiers, provenance
-// sources) plus the overview op's type×count composition — one composed payload, engine-derived.
+// sources) plus the overview op's type×count composition — one composed payload, engine-derived —
+// plus per-lane compression totals (source units observed vs facts produced) from the config store.
 pipelinesRouter.get("/api/sink/info", async (_req, res) => {
   try {
     const url = process.env.STROMA_URL ?? "http://127.0.0.1:7687";
@@ -58,7 +59,8 @@ pipelinesRouter.get("/api/sink/info", async (_req, res) => {
     } catch (e) {
       console.log(`  /api/sink/info: overview unavailable: ${(e as Error).message}`);
     }
-    res.json({ reachable: true, url, stats, composition });
+    const cfg = loadConfig();
+    res.json({ reachable: true, url, stats, composition, lanes: laneMetrics(cfg.pipelines, cfg.runs) });
   } catch (e) {
     res.json({ reachable: false, error: (e as Error).message });
   }

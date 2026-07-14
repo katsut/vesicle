@@ -11,6 +11,13 @@ import type { BatchItem } from "./types.ts";
 export type IngestStats = Record<string, unknown>;
 export type SinkStats = Record<string, unknown>;
 
+/** The engine's no-op counter from an /ingest response — incoming writes identical to current state
+ *  that were skipped. Absent when the engine did not report one. */
+export function suppressedOf(stats: IngestStats): number | undefined {
+  const n = stats["suppressed"];
+  return typeof n === "number" ? n : undefined;
+}
+
 export interface Sink {
   health(): Promise<boolean>;
   ingest(batch: BatchItem[], run: { pipelineId: string }): Promise<IngestStats>;

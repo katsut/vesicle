@@ -67,7 +67,42 @@ export interface PipelineRun {
   finishedAt: number;
   events: number;
   facts: number;
+  /** engine writes skipped as no-op re-observations (/ingest `suppressed`, summed over the run's
+   *  ingests); absent on runs recorded before the counter was wired through */
+  suppressed?: number;
   error?: string | null;
+}
+
+/** Per-lane compression totals for the sink view: how many source units were observed vs how many
+ *  facts they became. A lane is a PipelineDef or a run-only pipeline id (one-shot runs like the
+ *  Drive extract have no def). `observed` sums run events and is absent for lanes that record no
+ *  runs (live poll lanes advance def counters instead); `suppressed` is the most recent run's
+ *  counter, absent when unrecorded. */
+export interface LaneMetrics {
+  id: string;
+  name: string;
+  observed?: number;
+  facts: number;
+  suppressed?: number;
+}
+
+/** Aggregate defs + run history (most-recent first, as stored) into per-lane totals. Pure. */
+export function laneMetrics(pipelines: PipelineDef[], runs: PipelineRun[]): LaneMetrics[] {
+  const ids = pipelines.map((p) => p.id);
+  for (const r of runs) if (!ids.includes(r.pipelineId)) ids.push(r.pipelineId);
+  return ids.map((id) => {
+    const def = pipelines.find((p) => p.id === id);
+    const laneRuns = runs.filter((r) => r.pipelineId === id);
+    const lane: LaneMetrics = {
+      id,
+      name: def?.name ?? id,
+      facts: (def?.ingested ?? 0) + laneRuns.reduce((n, r) => n + r.facts, 0),
+    };
+    if (laneRuns.length) lane.observed = laneRuns.reduce((n, r) => n + r.events, 0);
+    const latest = laneRuns[0];
+    if (latest?.suppressed != null) lane.suppressed = latest.suppressed;
+    return lane;
+  });
 }
 
 export interface ConnectorConfig {
