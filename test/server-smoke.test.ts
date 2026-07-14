@@ -83,6 +83,12 @@ test("status endpoints answer with JSON on an empty var dir (auth disabled)", as
   assert.equal(identities.status, 503);
   const body = (await identities.json()) as { error?: string };
   assert.match(String(body.error), /not reachable/);
+
+  // the approvals scan mirrors identities: engine unreachable → the same 503
+  const approvals = await fetch(`${base}/api/approvals/candidates`);
+  assert.equal(approvals.status, 503);
+  const apBody = (await approvals.json()) as { error?: string };
+  assert.match(String(apBody.error), /not reachable/);
 });
 
 test("auth gate: /health and the webhook stay public, gated APIs return 401", async () => {
