@@ -276,8 +276,22 @@ export function claimsToBatch(input: {
     ),
   ];
 
+  // Auto name predicates: "<type>-name" (display) per entity type, so nodes with no value fact —
+  // a Section that only exists as an in-section target — still render by name. A pattern declaring
+  // the same predicate itself keeps ownership: no auto def, no auto fact for that type.
+  const declared = new Set(pattern.predicates.map((p) => p.name));
+  const namePred = (type: string): string | null => {
+    const n = `${type.toLowerCase()}-name`;
+    return declared.has(n) ? null : n;
+  };
+  for (const t of pattern.entity_types) {
+    const n = namePred(t);
+    if (n) defs.push({ pred_def: { name: n, cardinality: "one", domain: t, range_value: "text", display: true } });
+  }
+
   const types = new Set(pattern.entity_types);
   const nodeType = new Map<number, string>();
+  const nodeName = new Map<number, string>();
   const nodeLabel = new Map<number, number>();
   const facts: BatchItem[] = [];
   let maxFloor = 0;
@@ -288,6 +302,7 @@ export function claimsToBatch(input: {
     entityKeys.add(`${type}|${name}`);
     const id = claimNid(docKey, type, name);
     nodeType.set(id, type);
+    nodeName.set(id, name);
     nodeLabel.set(id, Math.max(nodeLabel.get(id) ?? 0, label));
     return id;
   };
@@ -309,6 +324,11 @@ export function claimsToBatch(input: {
     const eff = c.effectiveFrom ? isoToEpoch(c.effectiveFrom) : 0;
     facts.push({ fact: { subject, predicate: c.predicate, object, valid_from: eff > 0 ? eff : docEpoch, source } });
     if (floor > maxFloor) maxFloor = floor;
+  }
+
+  for (const [id, name] of nodeName) {
+    const pred = namePred(nodeType.get(id)!);
+    if (pred) facts.push({ fact: { subject: id, predicate: pred, object: { text: name }, valid_from: docEpoch, source } });
   }
 
   const nodes: BatchItem[] = [...nodeType.entries()].map(([id, type]): BatchItem => ({
