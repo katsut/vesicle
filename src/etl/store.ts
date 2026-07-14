@@ -121,6 +121,9 @@ export interface ConnectorConfig {
   /** approval candidates a human dismissed, each a [commentId, issueId] pair — same rationale as
    *  dismissedIdentityPairs (a non-approval is not a graph fact, so it lives here) */
   dismissedApprovals?: Array<[number, number]>;
+  /** pattern candidates a human dismissed, by stable patternId — same rationale as the pairs above
+   *  (a non-rule is not a graph fact, so it lives here) */
+  dismissedPatterns?: string[];
 }
 
 /** How many runs the store keeps (append via recordRun evicts the oldest beyond this). */
@@ -158,6 +161,7 @@ export function loadConfig(): ConnectorConfig {
     runs: raw.runs ?? [],
     dismissedIdentityPairs: raw.dismissedIdentityPairs ?? [],
     dismissedApprovals: raw.dismissedApprovals ?? [],
+    dismissedPatterns: raw.dismissedPatterns ?? [],
   };
   return cache;
 }
