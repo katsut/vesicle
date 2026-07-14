@@ -55,7 +55,8 @@ async function startServer(port: number, extraEnv: Record<string, string>): Prom
 }
 
 test("status endpoints answer with JSON on an empty var dir (auth disabled)", async () => {
-  const base = await startServer(5999, { VESICLE_NO_AUTH: "1" });
+  // STROMA_URL pinned to a closed port: the engine-backed endpoints must answer, not hang or 500
+  const base = await startServer(5999, { VESICLE_NO_AUTH: "1", STROMA_URL: "http://127.0.0.1:1" });
 
   const health = await fetch(`${base}/health`);
   assert.equal(health.status, 200);
@@ -76,6 +77,12 @@ test("status endpoints answer with JSON on an empty var dir (auth disabled)", as
   const pipelines = await fetch(`${base}/api/pipelines`);
   assert.equal(pipelines.status, 200);
   assert.deepEqual(await pipelines.json(), { pipelines: [], runs: [] });
+
+  // engine unreachable → the identities scan answers the same 503 the conformance endpoints use
+  const identities = await fetch(`${base}/api/identities/candidates`);
+  assert.equal(identities.status, 503);
+  const body = (await identities.json()) as { error?: string };
+  assert.match(String(body.error), /not reachable/);
 });
 
 test("auth gate: /health and the webhook stay public, gated APIs return 401", async () => {

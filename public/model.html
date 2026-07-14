@@ -103,6 +103,13 @@
   .err a{color:inherit}
   .loading{color:var(--mut);font-size:13px;padding:8px 0}
   .empty{color:var(--mut);font-size:13px;padding:10px 2px}
+  tr.id-dim td{opacity:.45}
+  .rowbtn{font:inherit;font-weight:600;font-size:12.5px;border-radius:var(--r-sm);padding:6px 12px;cursor:pointer;border:1px solid transparent;color:var(--accent-ink);background:linear-gradient(180deg,var(--accent),var(--accent-2));box-shadow:inset 0 1px 0 rgba(255,255,255,.3);transition:filter .15s}
+  .rowbtn.ghost{color:var(--fg-dim);background:var(--panel-2);border-color:var(--line-2);box-shadow:none}
+  .rowbtn:hover{filter:brightness(1.06)}
+  .rowbtn[disabled]{opacity:.5;cursor:default}
+  .idstate{font:600 11px/1 var(--mono);letter-spacing:.04em;padding:4px 9px;border-radius:100px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg-dim);white-space:nowrap}
+  .idstate.ok{color:var(--good);border-color:color-mix(in oklab,var(--good) 36%,var(--line));background:color-mix(in oklab,var(--good) 9%,var(--panel-2))}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -125,6 +132,7 @@
 <div class="wrap">
   <p class="tagline" data-i18n="tagline"></p>
   <div id="out"><div class="loading" data-i18n="loading"></div></div>
+  <div id="identities"></div>
 </div>
 
 <script type="module">
@@ -150,6 +158,14 @@ const I18N = {
     readonly_note: "Read-only. Propose → confirm authoring lives in the <a href=\"/\">wizard</a>; a confirmed mapping is applied as a one-shot pipeline run.",
     err_unauthorized: "Sign-in required — <a href=\"/login\">sign in</a> and reload.",
     err_request: "Request failed: {e}",
+    identities_head: "Identities",
+    id_tagline: "Cross-source Person candidates — the same human seen from different sources. Confirm asserts a symmetric same-as fact plus review facts; Dismiss only stops the pair from being proposed.",
+    th_pair: "pair", th_evidence: "evidence", th_state: "status",
+    ev_email: "email", ev_name: "name",
+    id_confirm: "Confirm", id_dismiss: "Dismiss",
+    id_confirmed: "✓ confirmed", id_dismissed: "dismissed",
+    id_empty: "no candidates",
+    id_offline: "StromaDB is not reachable — candidate generation needs the engine.",
   },
   ja: {
     nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル",
@@ -168,6 +184,14 @@ const I18N = {
     readonly_note: "読み取り専用。提案→確認の作成フローは<a href=\"/\">ウィザード</a>にあり、確認済みマッピングはワンショットのパイプライン実行として適用されます。",
     err_unauthorized: "サインインが必要です — <a href=\"/login\">サインイン</a>して再読み込みしてください。",
     err_request: "リクエストに失敗しました: {e}",
+    identities_head: "アイデンティティ",
+    id_tagline: "ソース横断の同一人物候補 — 別のソースに現れた同じ人物です。「確認」は対称な same-as ファクトとレビューファクトを書き込み、「却下」はこのペアが候補として提案されなくなるだけです。",
+    th_pair: "ペア", th_evidence: "根拠", th_state: "状態",
+    ev_email: "メール", ev_name: "名前",
+    id_confirm: "確認", id_dismiss: "却下",
+    id_confirmed: "✓ 確認済み", id_dismissed: "却下済み",
+    id_empty: "候補はありません",
+    id_offline: "StromaDB に接続できません — 候補の生成にはエンジンが必要です。",
   },
   zh: {
     nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型",
@@ -186,6 +210,14 @@ const I18N = {
     readonly_note: "只读。提案→确认的创建流程在<a href=\"/\">向导</a>中；确认后的映射将作为一次性管道运行来应用。",
     err_unauthorized: "需要登录 — 请<a href=\"/login\">登录</a>后重新加载。",
     err_request: "请求失败: {e}",
+    identities_head: "身份",
+    id_tagline: "跨数据源的同一人候选 — 同一个人出现在不同数据源中。「确认」写入对称的 same-as 事实及审核事实；「忽略」只是不再提议该组合。",
+    th_pair: "配对", th_evidence: "依据", th_state: "状态",
+    ev_email: "邮箱", ev_name: "姓名",
+    id_confirm: "确认", id_dismiss: "忽略",
+    id_confirmed: "✓ 已确认", id_dismissed: "已忽略",
+    id_empty: "没有候选",
+    id_offline: "无法连接 StromaDB — 生成候选需要引擎。",
   },
 };
 let LANG = "en";
@@ -198,6 +230,7 @@ function applyLang() {
   document.querySelectorAll("[data-i18n]").forEach((e) => { e.innerHTML = t(e.getAttribute("data-i18n")); });
   document.querySelectorAll("[data-i18n-title]").forEach((e) => { e.title = t(e.getAttribute("data-i18n-title")); });
   render();
+  renderIdentities();
 }
 
 const store = {
@@ -336,6 +369,81 @@ function render() {
   out.innerHTML = html.join("");
 }
 
+// --- Identities: cross-source Person duplicate candidates (GET /api/identities/candidates).
+// Rows are pre-sorted by the server: unresolved first (email evidence before name), confirmed next,
+// dismissed last (rendered dimmed). Confirm/Dismiss POST /api/identities/resolve, then reload.
+let IDS = { kind: "loading" };
+
+function personCell(p) {
+  const email = p.email ? ` <span style="color:var(--mut)">(${esc(p.email)})</span>` : "";
+  return `${esc(p.name ?? p.id)}${email}`;
+}
+
+function idRow(c) {
+  const state = c.confirmed ? `<span class="idstate ok">${esc(t("id_confirmed"))}</span>`
+    : c.dismissed ? `<span class="idstate">${esc(t("id_dismissed"))}</span>`
+    : `<button class="rowbtn" data-act="confirm" data-a="${c.a.id}" data-b="${c.b.id}">${esc(t("id_confirm"))}</button>
+       <button class="rowbtn ghost" data-act="dismiss" data-a="${c.a.id}" data-b="${c.b.id}">${esc(t("id_dismiss"))}</button>`;
+  return `<tr${c.dismissed ? ' class="id-dim"' : ""}>
+    <td>${personCell(c.a)} <span style="color:var(--mut)">↔</span> ${personCell(c.b)}</td>
+    <td><span class="cardin">${esc(t(c.evidence === "email" ? "ev_email" : "ev_name"))}</span></td>
+    <td style="white-space:nowrap">${state}</td>
+  </tr>`;
+}
+
+function renderIdentities() {
+  const el = $("#identities"); if (!el) return;
+  const head = `<div class="streamhead"><h2>${t("identities_head")}</h2><div class="bar"></div></div>
+    <p class="tagline" style="margin:0 0 12px">${esc(t("id_tagline"))}</p>`;
+  if (IDS.kind === "loading") { el.innerHTML = head + `<div class="loading">${t("loading")}</div>`; return; }
+  if (IDS.kind === "offline") { el.innerHTML = head + `<div class="empty">${esc(t("id_offline"))}</div>`; return; }
+  if (IDS.kind === "unauthorized") { el.innerHTML = head + `<div class="err">${t("err_unauthorized")}</div>`; return; }
+  if (IDS.kind === "error") { el.innerHTML = head + `<div class="err">${esc(t("err_request", { e: IDS.message }))}</div>`; return; }
+  el.innerHTML = head + (IDS.candidates.length
+    ? `<div class="tablewrap"><table>
+        <thead><tr><th>${t("th_pair")}</th><th>${t("th_evidence")}</th><th>${t("th_state")}</th></tr></thead>
+        <tbody>${IDS.candidates.map(idRow).join("")}</tbody></table></div>`
+    : `<div class="empty">${esc(t("id_empty"))}</div>`);
+}
+
+async function loadIdentities() {
+  try {
+    const r = await fetch("/api/identities/candidates");
+    if (r.status === 503) { IDS = { kind: "offline" }; renderIdentities(); return; }
+    if (r.status === 401) { IDS = { kind: "unauthorized" }; renderIdentities(); return; }
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j) { IDS = { kind: "error", message: (j && j.error) || `HTTP ${r.status}` }; renderIdentities(); return; }
+    IDS = { kind: "data", candidates: Array.isArray(j.candidates) ? j.candidates : [] };
+  } catch (e) {
+    IDS = { kind: "error", message: e.message };
+  }
+  renderIdentities();
+}
+
+// Confirm/Dismiss (event delegation): the reviewer defaults to the signed-in user shown in the
+// topbar, else "reviewer" — no prompt, the verdict itself is the interaction.
+$("#identities").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-act]");
+  if (!btn) return;
+  btn.disabled = true;
+  const reviewer = $("#userPill").hidden ? "reviewer" : ($("#userName").textContent || "reviewer");
+  try {
+    const r = await fetch("/api/identities/resolve", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ a: Number(btn.dataset.a), b: Number(btn.dataset.b), decision: btn.dataset.act, reviewer }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => null);
+      throw new Error((j && j.error) || `HTTP ${r.status}`);
+    }
+  } catch (e) {
+    IDS = { kind: "error", message: e.message };
+    renderIdentities();
+    return;
+  }
+  await loadIdentities();
+});
+
 async function load() {
   try {
     const r = await fetch("/api/model");
@@ -355,6 +463,7 @@ applyTheme();
 setLang(LANG);
 refreshStatus();
 load();
+loadIdentities();
 </script>
 </body>
 </html>
