@@ -18,6 +18,7 @@ import {
   claimsToBatch,
   classifyFiles,
   parseClaims,
+  parseKnownEntities,
   type DocClaim,
   type DocPattern,
 } from "../src/gdrive-extract.ts";
@@ -231,6 +232,56 @@ test("buildDocPrompt: known entities from earlier revisions instruct exact-name 
   assert.ok(!p.includes("Section:"), "empty type lists are omitted");
   const bare = buildDocPrompt(DEFAULT_PATTERN, { kind: "text", text: "doc" });
   assert.ok(!bare.includes("SAME document family"), "no known-entities block without input");
+});
+
+// --- family anchor (cross-request name reuse) ---------------------------------------------------------
+
+test("claimsToBatch: family anchor persists only entity keys NOT in the baseline", () => {
+  const claims: DocClaim[] = [
+    { subject: "Rule 4.2", subjectType: "Rule", predicate: "in-section", object: "Section 4", objectType: "Section" },
+    { subject: "Rule 9", subjectType: "Rule", predicate: "rule-title", object: "Travel" },
+  ];
+  const { items, newEntityKeys } = claimsToBatch({
+    fileId: "file-v2",
+    logicalDocId: "policy-x",
+    docLabel: 1,
+    modifiedTime: "2026-01-15T09:30:00Z",
+    pattern: PATTERN,
+    claims,
+    model: modelWithFloors({ "rule-title": 2 }),
+    familyBaseline: new Set(["Rule|Rule 4.2"]), // already persisted (or sent earlier this request)
+  });
+  assert.deepEqual(newEntityKeys, ["Section|Section 4", "Rule|Rule 9"]);
+  const family = nid("DocFamily", "policy-x");
+  const ke = factsOf(items).filter((f) => f.predicate === "known-entities");
+  assert.deepEqual(ke.map((f) => f.object), [{ text: "Section|Section 4" }, { text: "Rule|Rule 9" }]);
+  for (const f of ke) {
+    assert.equal(f.subject, family);
+    assert.equal(f.source, "drive:file-v2"); // provenance = the ACTUAL revision file
+    assert.equal(f.valid_from, Math.floor(Date.parse("2026-01-15T09:30:00Z") / 1000));
+  }
+  const anchor = nodesOf(items).find((n) => n.type === "DocFamily");
+  assert.ok(anchor, "DocFamily node missing");
+  assert.equal(anchor!.id, family);
+  assert.equal(anchor!.label, 2); // ratcheted by the rule-title floor above the doc tier
+  assert.ok(items.some((i) => "type_def" in i && i.type_def.name === "DocFamily"), "DocFamily type_def missing");
+  const kd = items.find((i) => "pred_def" in i && i.pred_def.name === "known-entities");
+  assert.ok(kd && "pred_def" in kd && kd.pred_def.cardinality === "many" && kd.pred_def.domain === "DocFamily");
+});
+
+test("parseKnownEntities: splits at the FIRST pipe — entity names may contain pipes", () => {
+  const out = parseKnownEntities(["Rule|Rule 4.2", "Rule|Scope | Exceptions", "Section|S1", "no-pipe", "|no-type", "Rule|"]);
+  assert.deepEqual(out, { Rule: ["Rule 4.2", "Scope | Exceptions"], Section: ["S1"] });
+});
+
+test("claimsToBatch: without logicalDocId no family items are emitted", () => {
+  const claims: DocClaim[] = [{ subject: "Rule 1", subjectType: "Rule", predicate: "rule-title", object: "T" }];
+  const { items, newEntityKeys } = claimsToBatch({ fileId: FILE_ID, docLabel: 1, pattern: PATTERN, claims, model: modelWithFloors({}) });
+  assert.deepEqual(newEntityKeys, []);
+  assert.ok(!items.some((i) => "type_def" in i && i.type_def.name === "DocFamily"));
+  assert.ok(!items.some((i) => "pred_def" in i && i.pred_def.name === "known-entities"));
+  assert.ok(nodesOf(items).every((n) => n.type !== "DocFamily"));
+  assert.ok(!factsOf(items).some((f) => f.predicate === "known-entities"));
 });
 
 test("entityNamesOf: accumulates subject and edge-object names by type, deduped", () => {

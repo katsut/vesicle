@@ -35,6 +35,7 @@ import { DOC_MIME, PDF_MIME, SLIDES_MIME, WORD_MIME, type DriveFile } from "./gd
 import { hash48, nid, sensitivityLabel } from "./gdrive.ts";
 import { callLLM, extractJson } from "./llm.ts";
 import { sensitivityFloor, type SharedModel } from "./model.ts";
+import type { Stroma } from "./stroma.ts";
 
 // --- pattern -------------------------------------------------------------------------------------
 
@@ -233,6 +234,8 @@ export interface ClaimBatch {
   items: BatchItem[];
   factCount: number;
   entityCount: number;
+  /** entity keys ("<Type>|<name>") newly written to the family anchor — [] without logicalDocId */
+  newEntityKeys: string[];
   /** the declared policy requirement stamped on the Document node, when any claim predicate has a floor */
   requiresFloor: number | null;
 }
@@ -251,6 +254,8 @@ export function claimsToBatch(input: {
   pattern: DocPattern;
   claims: DocClaim[];
   model: SharedModel;
+  /** family-anchor keys already persisted or already sent this request — only NEW keys are written */
+  familyBaseline?: Set<string>;
 }): ClaimBatch {
   const { fileId, docLabel, pattern, claims, model } = input;
   // provenance stays the ACTUAL file (which revision said it); only claim identity uses the logical key
@@ -277,8 +282,10 @@ export function claimsToBatch(input: {
   const facts: BatchItem[] = [];
   let maxFloor = 0;
 
+  const entityKeys = new Set<string>();
   const entity = (type: string, name: string, label: number): number | null => {
     if (!types.has(type)) return null; // a type outside the pattern never mints a node
+    entityKeys.add(`${type}|${name}`);
     const id = claimNid(docKey, type, name);
     nodeType.set(id, type);
     nodeLabel.set(id, Math.max(nodeLabel.get(id) ?? 0, label));
@@ -307,6 +314,24 @@ export function claimsToBatch(input: {
   const nodes: BatchItem[] = [...nodeType.entries()].map(([id, type]): BatchItem => ({
     node: { id, type, label: nodeLabel.get(id)! },
   }));
+  const entityCount = nodes.length;
+
+  // Family anchor: claimNid hashes the entity name away, so each NEW "<Type>|<name>" key is also
+  // persisted as a known-entities value on the family's DocFamily node — a LATER request over the
+  // same family reads them back (readFamilyEntityKeys) to seed its prompts. Dedupe is client-side
+  // against the baseline; the anchor's label ratchets like the entities' (at least the doc's tier).
+  const newEntityKeys: string[] = [];
+  if (input.logicalDocId) {
+    const family = nid("DocFamily", input.logicalDocId);
+    defs.push({ type_def: { name: "DocFamily" } });
+    defs.push({ pred_def: { name: "known-entities", cardinality: "many", domain: "DocFamily", range_value: "text" } });
+    nodes.push({ node: { id: family, type: "DocFamily", label: Math.max(docLabel, ...nodeLabel.values()) } });
+    for (const key of entityKeys) {
+      if (input.familyBaseline?.has(key)) continue;
+      newEntityKeys.push(key);
+      facts.push({ fact: { subject: family, predicate: "known-entities", object: { text: key }, valid_from: docEpoch, source } });
+    }
+  }
 
   // Declared policy requirement on the SOURCE Document node (structural-lane id): the max
   // sensitivity floor over the ingested claims' predicates ALONE — deliberately NOT max'd with the
@@ -314,7 +339,6 @@ export function claimsToBatch(input: {
   // flag over-shared files. valid_from = the document's modifiedTime (the same instant the
   // structural lane stamps), so the requirement supersedes in step with the document itself.
   const requiresFloor = maxFloor > 0 ? maxFloor : null;
-  const entityCount = nodes.length;
   if (requiresFloor != null) {
     defs.push({ pred_def: { name: "requires-floor", cardinality: "one", domain: "Document", range_value: "int" } });
     facts.push({
@@ -328,5 +352,34 @@ export function claimsToBatch(input: {
     });
   }
 
-  return { items: [...defs, ...nodes, ...facts], factCount: facts.length, entityCount, requiresFloor };
+  return { items: [...defs, ...nodes, ...facts], factCount: facts.length, entityCount, newEntityKeys, requiresFloor };
+}
+
+// --- family anchor reads ---------------------------------------------------------------------------
+
+/** Persisted known-entities values ("<Type>|<name>") → the knownEntities prompt shape. Type names
+ *  never contain a pipe, entity names may — split at the FIRST pipe. Malformed values are skipped. */
+export function parseKnownEntities(values: string[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const v of values) {
+    const i = v.indexOf("|");
+    if (i <= 0 || i === v.length - 1) continue;
+    (out[v.slice(0, i)] ??= []).push(v.slice(i + 1));
+  }
+  return out;
+}
+
+/** Read a family anchor's persisted entity keys. An engine that has never seen the predicate
+ *  (first extraction of any family) reads as empty; a missing node reads as empty too. */
+export async function readFamilyEntityKeys(db: Stroma, logicalDocId: string): Promise<string[]> {
+  await db.ensureAuthed();
+  let j: Record<string, unknown>;
+  try {
+    j = await db.query({ op: "point", subject: nid("DocFamily", logicalDocId), predicate: "known-entities" });
+  } catch (e) {
+    if ((e as Error).message.includes("unknown predicate")) return [];
+    throw e;
+  }
+  const many = (j.many as Array<{ text?: string }> | undefined) ?? [];
+  return many.map((v) => v.text).filter((t): t is string => typeof t === "string");
 }
