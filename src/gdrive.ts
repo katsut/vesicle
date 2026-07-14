@@ -148,16 +148,19 @@ export function driveFileToBatch(file: DriveFile): GdriveBatch {
     }
     return gid;
   };
-  const fact = (subject: number, predicate: string, object: FactObject): void => {
-    facts.push({ fact: { subject, predicate, object, valid_from: at } });
+  // Person-identity facts pass vf 0 ("always valid"): stamping them with the FILE's modifiedTime
+  // would re-assert the same identity under a different valid_from for every file the person
+  // appears in, defeating the engine's no-op suppression on re-syncs.
+  const fact = (subject: number, predicate: string, object: FactObject, vf: number = at): void => {
+    facts.push({ fact: { subject, predicate, object, valid_from: vf } });
   };
 
   const person = (u: DriveUser | DrivePermission): number | null => {
     const key = personKey(u);
     if (!key) return null;
     const pid = node("Person", key);
-    if (u.displayName) fact(pid, "name", { text: u.displayName });
-    if (u.emailAddress) fact(pid, "email", { text: u.emailAddress });
+    if (u.displayName) fact(pid, "name", { text: u.displayName }, 0);
+    if (u.emailAddress) fact(pid, "email", { text: u.emailAddress }, 0);
     return pid;
   };
 
@@ -195,8 +198,8 @@ export function driveFileToBatch(file: DriveFile): GdriveBatch {
     // A deleted grantee stays in the graph (the ACL still carries the grant — a hygiene finding),
     // labeled the way Drive's own UI shows it; the API returns no identity for it.
     if (perm.deleted) {
-      fact(pid, "name", { text: "(deleted account)" });
-      fact(pid, "account-deleted", { bool: true });
+      fact(pid, "name", { text: "(deleted account)" }, 0);
+      fact(pid, "account-deleted", { bool: true }, 0);
     }
     fact(doc, "can-access", { node: pid });
     grants++;

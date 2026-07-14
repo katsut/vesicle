@@ -129,7 +129,7 @@ async function pollOnceGdrive(pipelineId: string): Promise<void> {
         // the root never appears in the listing itself — name its Folder node once per listing
         try {
           const drive = await getDrive(cfg, scope.id);
-          const { repairs } = await repairLateArrivals(guardDb, sink, driveRootBatch(scope.id, drive.name, Date.now()), { pipelineId });
+          const { repairs } = await repairLateArrivals(guardDb, sink, driveRootBatch(scope.id, drive.name, 0), { pipelineId });
           logRepairs(pipelineId, repairs);
           facts += 1;
         } catch (e) {
