@@ -7,9 +7,12 @@
 // approved-at facts on the issue plus review facts — the same review idiom as src/identities.ts.
 
 import type { Stroma } from "./stroma.ts";
+import { personBand, type Band } from "./identities.ts";
 
-// Backlog Comment id band (src/backlog.ts BASE.Comment) — the band holds only Comments, so an id
-// check suffices; no node-detail read is needed to know the type.
+// Backlog Issue/Comment id bands (src/backlog.ts BASE) — each band holds one type, so an id check
+// suffices; no node-detail read is needed to know the type.
+const ISSUE_LO = 3_000_000_000_000;
+const ISSUE_HI = 4_000_000_000_000;
 const COMMENT_LO = 4_000_000_000_000;
 const COMMENT_HI = 5_000_000_000_000;
 
@@ -173,6 +176,116 @@ export async function findApprovalCandidates(db: Stroma): Promise<Candidate[]> {
     });
   }
   return out;
+}
+
+/** What the graph already knows about an approver, carried on the candidate card. Counts are
+ *  activity observed in the scanned graph window; a field is omitted (never reported as 0) when
+ *  nothing was observed — the scan is budgeted, so "not seen" is absence of evidence, not a fact.
+ *  linkedAccounts are the approver's confirmed same-as identities, preformatted for display. */
+export interface ApproverContext {
+  comments?: number;
+  issuesAssigned?: number;
+  issuesCreated?: number;
+  linkedAccounts?: string[];
+  // role: deferred until an organization-structure source exists
+}
+
+/** One activity edge observed in the scan: an Issue's assignee/creator or a Comment's author. */
+export type ActivityKind = "comment" | "issue-assigned" | "issue-created";
+
+export interface ActivityObs {
+  kind: ActivityKind;
+  person: number;
+}
+
+/** A confirmed same-as neighbour, before display formatting. */
+export interface LinkedAccount {
+  id: number;
+  name: string | null;
+}
+
+const BAND_LABEL: Record<Band, string> = { hr: "HR", backlog: "Backlog", drive: "Drive" };
+
+/** "Jane Doe (Drive)" — the neighbour's display name (its id when unnamed) plus its source family. */
+export function linkedAccountLabel(acct: LinkedAccount): string {
+  const band = personBand(acct.id);
+  const name = acct.name ?? String(acct.id);
+  return band ? `${name} (${BAND_LABEL[band]})` : name;
+}
+
+/** Pure aggregation (unit-tested): fold scan observations into per-approver context. Observations
+ *  for persons outside `approvers` are dropped; zero counts and empty linked lists are omitted; an
+ *  approver with no context at all gets no map entry. */
+export function aggregateApproverContext(
+  approvers: Iterable<number>,
+  activity: Iterable<ActivityObs>,
+  linked: ReadonlyMap<number, LinkedAccount[]>,
+): Map<number, ApproverContext> {
+  const want = new Set(approvers);
+  const counts = new Map<number, Record<ActivityKind, number>>();
+  for (const obs of activity) {
+    if (!want.has(obs.person)) continue;
+    const c = counts.get(obs.person) ?? { comment: 0, "issue-assigned": 0, "issue-created": 0 };
+    c[obs.kind]++;
+    counts.set(obs.person, c);
+  }
+  const out = new Map<number, ApproverContext>();
+  for (const id of want) {
+    const c = counts.get(id);
+    const ctx: ApproverContext = {};
+    if (c?.comment) ctx.comments = c.comment;
+    if (c?.["issue-assigned"]) ctx.issuesAssigned = c["issue-assigned"];
+    if (c?.["issue-created"]) ctx.issuesCreated = c["issue-created"];
+    const accounts = linked.get(id) ?? [];
+    if (accounts.length) ctx.linkedAccounts = accounts.map(linkedAccountLabel);
+    if (Object.keys(ctx).length) out.set(id, ctx);
+  }
+  return out;
+}
+
+/** The approver's confirmed same-as neighbours — a same-as edge is only ever written by a human
+ *  identity review (src/identities.ts), so edge presence IS confirmation. The predicate not being
+ *  declared yet (nothing confirmed anywhere) is a normal state, not an error. */
+async function sameAsNeighbours(db: Stroma, id: number): Promise<number[]> {
+  try {
+    return await db.expand(id, "same-as");
+  } catch (e) {
+    if (!(e as Error).message.includes("unknown predicate")) throw e;
+    return [];
+  }
+}
+
+/** Context for every approver in one budgeted graph scan. The activity predicates all point AT the
+ *  person (Issue→assigned-to/created-by, Comment→commented-by) and expand only walks forward, so
+ *  per-approver reads cannot count them; instead one scan reads each Issue's and each Comment's
+ *  person edges once and aggregates for the whole candidate list — never N expands per candidate.
+ *  same-as IS forward-readable (symmetric), so linked accounts cost one expand per approver. */
+export async function approverContexts(db: Stroma, approvers: ReadonlySet<number>): Promise<Map<number, ApproverContext>> {
+  if (!approvers.size) return new Map();
+  await db.ensureAuthed();
+  const g = await db.query({ op: "graph", max_nodes: 6000 });
+  const nodes = (g.nodes as Array<{ id: number }>) ?? [];
+  const activity: ActivityObs[] = [];
+  const push = (kind: ActivityKind, person: number | null): void => {
+    if (person != null && approvers.has(person)) activity.push({ kind, person });
+  };
+  for (const n of nodes) {
+    if (n.id >= ISSUE_LO && n.id < ISSUE_HI) {
+      push("issue-assigned", await db.point(n.id, "assigned-to"));
+      push("issue-created", await db.point(n.id, "created-by"));
+    } else if (n.id >= COMMENT_LO && n.id < COMMENT_HI) {
+      push("comment", await db.point(n.id, "commented-by"));
+    }
+  }
+  const linked = new Map<number, LinkedAccount[]>();
+  for (const id of approvers) {
+    const accounts: LinkedAccount[] = [];
+    for (const other of await sameAsNeighbours(db, id)) {
+      accounts.push({ id: other, name: await db.pointText(other, "name") });
+    }
+    if (accounts.length) linked.set(id, accounts);
+  }
+  return aggregateApproverContext(approvers, activity, linked);
 }
 
 /** Approval predicates (idempotent to (re)declare — the engine allows re-sending the same def).

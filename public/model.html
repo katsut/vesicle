@@ -114,6 +114,7 @@
   .policycard .q{flex:1;font-weight:600;font-size:13.5px;min-width:220px}
   .cardin.strong{color:var(--accent-2);border-color:color-mix(in oklab,var(--accent) 36%,var(--line));background:color-mix(in oklab,var(--accent) 9%,var(--panel-2))}
   .snip{color:var(--mut);font-size:12.5px}
+  .apctx{color:var(--mut);font-size:11.5px;margin-top:3px;line-height:1.45}
   .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);z-index:40;background:var(--panel);color:var(--fg);border:1px solid color-mix(in oklab,var(--good) 36%,var(--line));border-radius:var(--r-sm);padding:10px 16px;font-size:13px;box-shadow:var(--bevel),var(--shadow);opacity:0;transition:opacity .18s,transform .18s;pointer-events:none}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -190,6 +191,10 @@ const I18N = {
     ap_confirmed: "✓ confirmed", ap_dismissed: "dismissed",
     ap_empty: "no candidates",
     ap_offline: "StromaDB is not reachable — candidate generation needs the engine.",
+    ap_ctx_comments: "{n} comments",
+    ap_ctx_assigned: "{n} issues assigned",
+    ap_ctx_created: "{n} issues created",
+    ap_ctx_linked: "linked: {a}",
     patterns_head: "Patterns",
     pat_tagline: "Mined rule candidates from event regularities — deterministic counts over the graph, no LLM. Promote asserts a MinedRule record, Record as risk a RiskNote record (provenance pattern-review); Dismiss only stops the pattern from being proposed.",
     tmpl_issue_assignee: "Issue assignment",
@@ -242,6 +247,10 @@ const I18N = {
     ap_confirmed: "✓ 確認済み", ap_dismissed: "却下済み",
     ap_empty: "候補はありません",
     ap_offline: "StromaDB に接続できません — 候補の生成にはエンジンが必要です。",
+    ap_ctx_comments: "コメント {n} 件",
+    ap_ctx_assigned: "担当課題 {n} 件",
+    ap_ctx_created: "作成課題 {n} 件",
+    ap_ctx_linked: "連携アカウント: {a}",
     patterns_head: "パターン",
     pat_tagline: "イベントの規則性から数え上げたルール候補 — グラフ上の決定論的カウントで、LLM は使いません。「ルールに昇格」は MinedRule レコードを、「リスクとして記録」は RiskNote レコードを書き込み（来歴は pattern-review）、「却下」はこのパターンが提案されなくなるだけです。",
     tmpl_issue_assignee: "課題の担当",
@@ -294,6 +303,10 @@ const I18N = {
     ap_confirmed: "✓ 已确认", ap_dismissed: "已忽略",
     ap_empty: "没有候选",
     ap_offline: "无法连接 StromaDB — 生成候选需要引擎。",
+    ap_ctx_comments: "{n} 条评论",
+    ap_ctx_assigned: "负责议题 {n} 个",
+    ap_ctx_created: "创建议题 {n} 个",
+    ap_ctx_linked: "关联账号: {a}",
     patterns_head: "模式",
     pat_tagline: "从事件规律中数出的规则候选 — 图上的确定性计数，不使用 LLM。「提升为规则」写入 MinedRule 记录，「记为风险」写入 RiskNote 记录（来源为 pattern-review）；「忽略」只是不再提议该模式。",
     tmpl_issue_assignee: "议题指派",
@@ -599,6 +612,19 @@ let APS = { kind: "loading" };
 
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
+// The approver-context line: what the graph already knows about the person — activity counts and
+// confirmed linked accounts. Absent values are simply not shown; the reviewer weighs what is there.
+function apCtx(c) {
+  const x = c.approverContext;
+  if (!x) return "";
+  const parts = [];
+  if (x.comments) parts.push(t("ap_ctx_comments", { n: x.comments }));
+  if (x.issuesAssigned) parts.push(t("ap_ctx_assigned", { n: x.issuesAssigned }));
+  if (x.issuesCreated) parts.push(t("ap_ctx_created", { n: x.issuesCreated }));
+  if (Array.isArray(x.linkedAccounts) && x.linkedAccounts.length) parts.push(t("ap_ctx_linked", { a: x.linkedAccounts.join(", ") }));
+  return parts.length ? `<div class="apctx">${esc(parts.join(" · "))}</div>` : "";
+}
+
 function apRow(c) {
   const ids = `data-comment="${c.comment}" data-issue="${c.issue}" data-approver="${c.approver}" data-at="${c.at}"`;
   const state = c.confirmed ? `<span class="idstate ok">${esc(t("ap_confirmed"))}</span>`
@@ -609,7 +635,7 @@ function apRow(c) {
   const when = c.at ? new Date(c.at * 1000).toLocaleDateString() : "—";
   return `<tr${c.dismissed ? ' class="id-dim"' : ""}>
     <td><span class="pname">${esc(c.issueKey ?? c.issue)}</span> <span style="color:var(--fg-dim)">${esc(clip(c.summary ?? "", 60))}</span></td>
-    <td>${esc(c.approverName ?? c.approver)}</td>
+    <td>${esc(c.approverName ?? c.approver)}${apCtx(c)}</td>
     <td>${tier} <span class="snip">“${esc(c.snippet)}”</span></td>
     <td style="white-space:nowrap;color:var(--fg-dim)">${esc(when)}</td>
     <td style="white-space:nowrap">${state}</td>

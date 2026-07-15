@@ -1,12 +1,13 @@
 // Unit tests for the deterministic half of approval detection (src/approvals.ts): the tiered
 // pattern scan — Japanese substrings, word-boundary Latin tokens, the negation/conditional/question
-// guards, and snippet windowing. Pure function — no engine, no server.
+// guards, and snippet windowing — plus the approver-context aggregation (stubbed scan observations
+// → per-approver counts with absent fields omitted). Pure functions — no engine, no server.
 //
 // Run: pnpm test   (tsx --test)
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { matchApproval } from "../src/approvals.ts";
+import { aggregateApproverContext, linkedAccountLabel, matchApproval, type ActivityObs } from "../src/approvals.ts";
 
 test("matchApproval: Japanese formal phrases hit as substrings", () => {
   const m = matchApproval("上記の内容で承認します。");
@@ -83,4 +84,58 @@ test("matchApproval: snippet is a ±40-char window around the hit", () => {
 
   const atStart = "LGTM " + "b".repeat(100);
   assert.equal(matchApproval(atStart)?.snippet, "LGTM " + "b".repeat(39)); // window clamps at the text edges
+});
+
+// --- approver-context aggregation --------------------------------------------------------------
+
+const BACKLOG = 1_000_000_000_000; // src/backlog.ts BASE.Person
+const DRIVE = 7 * 2 ** 48; // src/gdrive.ts BAND.Person
+
+const ALICE = BACKLOG + 1;
+const BOB = BACKLOG + 2;
+
+test("aggregateApproverContext: observations fold into per-approver counts", () => {
+  const activity: ActivityObs[] = [
+    { kind: "comment", person: ALICE },
+    { kind: "comment", person: ALICE },
+    { kind: "comment", person: ALICE },
+    { kind: "issue-assigned", person: ALICE },
+    { kind: "issue-created", person: ALICE },
+    { kind: "issue-created", person: ALICE },
+    { kind: "comment", person: BOB },
+  ];
+  const ctx = aggregateApproverContext([ALICE, BOB], activity, new Map());
+  assert.deepEqual(ctx.get(ALICE), { comments: 3, issuesAssigned: 1, issuesCreated: 2 });
+  assert.deepEqual(ctx.get(BOB), { comments: 1 });
+});
+
+test("aggregateApproverContext: zero counts are omitted, never reported as 0", () => {
+  const ctx = aggregateApproverContext([ALICE], [{ kind: "issue-assigned", person: ALICE }], new Map());
+  const alice = ctx.get(ALICE);
+  assert.deepEqual(alice, { issuesAssigned: 1 });
+  assert.ok(alice && !("comments" in alice) && !("issuesCreated" in alice) && !("linkedAccounts" in alice));
+});
+
+test("aggregateApproverContext: observations for non-approvers are dropped", () => {
+  const ctx = aggregateApproverContext([ALICE], [{ kind: "comment", person: BOB }], new Map());
+  assert.equal(ctx.size, 0);
+});
+
+test("aggregateApproverContext: an approver the graph knows nothing about gets no entry", () => {
+  const ctx = aggregateApproverContext([ALICE, BOB], [{ kind: "comment", person: ALICE }], new Map());
+  assert.ok(ctx.has(ALICE));
+  assert.ok(!ctx.has(BOB));
+});
+
+test("aggregateApproverContext: confirmed linked accounts come back display-formatted", () => {
+  const linked = new Map([[ALICE, [{ id: DRIVE + 9, name: "Alice Cooper" }]]]);
+  const ctx = aggregateApproverContext([ALICE], [], linked);
+  assert.deepEqual(ctx.get(ALICE), { linkedAccounts: ["Alice Cooper (Drive)"] });
+});
+
+test("linkedAccountLabel: band suffix per source family, id fallback when unnamed", () => {
+  assert.equal(linkedAccountLabel({ id: DRIVE + 9, name: "Alice Cooper" }), "Alice Cooper (Drive)");
+  assert.equal(linkedAccountLabel({ id: BACKLOG + 1, name: "Bob Smith" }), "Bob Smith (Backlog)");
+  assert.equal(linkedAccountLabel({ id: 42, name: "Jane Doe" }), "Jane Doe (HR)");
+  assert.equal(linkedAccountLabel({ id: DRIVE + 9, name: null }), `${DRIVE + 9} (Drive)`);
 });

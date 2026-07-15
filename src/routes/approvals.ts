@@ -5,7 +5,7 @@
 
 import express from "express";
 import { Stroma } from "../stroma.ts";
-import { confirmApproval, findApprovalCandidates, type Candidate } from "../approvals.ts";
+import { approverContexts, confirmApproval, findApprovalCandidates, type Candidate } from "../approvals.ts";
 import { loadConfig, saveConfig } from "../etl/store.ts";
 
 export const approvalsRouter = express.Router();
@@ -13,7 +13,9 @@ export const approvalsRouter = express.Router();
 // GET /api/approvals/candidates → deterministic comment-scan candidates with their review state.
 // Already-confirmed and dismissed candidates are marked, not hidden; unresolved candidates sort
 // first, formal evidence (strong) before euphemism, dismissed candidates last; newest comment first
-// within each group.
+// within each group. Each candidate carries approverContext — what the graph already knows about
+// the approver (activity counts, confirmed linked accounts) — gathered once for all approvers;
+// absent when the graph knows nothing.
 approvalsRouter.get("/api/approvals/candidates", async (_req, res) => {
   try {
     const db = new Stroma();
@@ -22,7 +24,9 @@ approvalsRouter.get("/api/approvals/candidates", async (_req, res) => {
     }
     const dismissed = loadConfig().dismissedApprovals ?? [];
     const isDismissed = (comment: number, issue: number): boolean => dismissed.some(([c, i]) => c === comment && i === issue);
-    const candidates = (await findApprovalCandidates(db)).map((c) => ({ ...c, dismissed: isDismissed(c.comment, c.issue) }));
+    const scanned = await findApprovalCandidates(db);
+    const contexts = await approverContexts(db, new Set(scanned.map((c) => c.approver)));
+    const candidates = scanned.map((c) => ({ ...c, dismissed: isDismissed(c.comment, c.issue), approverContext: contexts.get(c.approver) }));
     const rank = (c: Candidate): number =>
       (!c.confirmed && !c.dismissed ? 0 : c.confirmed ? 2 : 4) + (c.tier === "formal" ? 0 : 1);
     candidates.sort((x, y) => rank(x) - rank(y) || y.at - x.at);
