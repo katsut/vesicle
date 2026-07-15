@@ -214,3 +214,13 @@ export function driveFileToBatch(file: DriveFile): GdriveBatch {
     factCount: facts.length,
   };
 }
+
+/** Grants stored in the graph but absent from the fresh ACL — the revoked ones. One retract per
+ *  vanished person grant: can-access is cardinality-many, so removal is an observed-remove retract
+ *  (a close is for one-cardinality heads). The caller decides WHEN diffing is safe (the ACL must be
+ *  actually known, not a failed fetch). */
+export function grantRetractions(docId: number, incomingPersonIds: ReadonlySet<number>, storedPersonIds: readonly number[]): BatchItem[] {
+  return storedPersonIds
+    .filter((pid) => !incomingPersonIds.has(pid))
+    .map((pid) => ({ retract: { subject: docId, predicate: "can-access", object: { node: pid } } }));
+}
