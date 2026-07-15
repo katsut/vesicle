@@ -5,7 +5,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { DriveFile } from "../src/gdrive-api.ts";
-import { driveFileToBatch, driveRootBatch, nid } from "../src/gdrive.ts";
+import { driveFileToBatch, driveRootBatch, grantRetractions, nid } from "../src/gdrive.ts";
 
 test("driveRootBatch names the shared drive's root Folder node", () => {
   const items = driveRootBatch("0Aexample", "Team Drive", 1_700_000_000_000);
@@ -40,4 +40,30 @@ test("person-identity facts carry valid_from 0, file facts carry the file's time
   assert.ok(facts.some((f) => f.predicate === "name"));
   assert.ok(facts.some((f) => f.predicate === "account-deleted"));
   assert.ok(facts.some((f) => f.predicate === "doc-name"));
+});
+
+test("grantRetractions retracts exactly the stored grants missing from the incoming set", () => {
+  const out = grantRetractions(100, new Set([11, 12]), [11, 12, 13, 14]);
+  assert.deepEqual(out, [
+    { retract: { subject: 100, predicate: "can-access", object: { node: 13 } } },
+    { retract: { subject: 100, predicate: "can-access", object: { node: 14 } } },
+  ]);
+});
+
+test("grantRetractions is empty when the ACL and the stored grants agree", () => {
+  assert.deepEqual(grantRetractions(100, new Set([21, 22]), [22, 21]), []);
+});
+
+test("grantRetractions retracts every stored grant when the incoming set is empty", () => {
+  const out = grantRetractions(200, new Set<number>(), [31, 32, 33]);
+  assert.deepEqual(out, [
+    { retract: { subject: 200, predicate: "can-access", object: { node: 31 } } },
+    { retract: { subject: 200, predicate: "can-access", object: { node: 32 } } },
+    { retract: { subject: 200, predicate: "can-access", object: { node: 33 } } },
+  ]);
+});
+
+test("retract items serialize to the engine's wire shape", () => {
+  const [item] = grantRetractions(300, new Set<number>(), [42]);
+  assert.equal(JSON.stringify(item), '{"retract":{"subject":300,"predicate":"can-access","object":{"node":42}}}');
 });

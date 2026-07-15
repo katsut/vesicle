@@ -5,7 +5,7 @@ import express from "express";
 import { randomBytes } from "node:crypto";
 import { authorizeUrl as gdriveAuthorizeUrl, exchangeCode as gdriveExchangeCode, refreshToken as refreshGoogleToken } from "../gdrive-oauth.ts";
 import { DOC_MIME, PDF_MIME, SLIDES_MIME, WORD_MIME, downloadFile, exportDoc, exportPdf, getDrive, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "../gdrive-api.ts";
-import { driveFileToBatch, driveRootBatch, sensitivityLabel } from "../gdrive.ts";
+import { driveFileToBatch, driveRootBatch, grantRetractions, nid, sensitivityLabel } from "../gdrive.ts";
 import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, entityNamesOf, extractClaims, parseKnownEntities, readFamilyEntityKeys, type DocContent, type DocPattern } from "../gdrive-extract.ts";
 import { docxToText } from "../docx.ts";
 import { evaluateSharing, recordSharingReview, type SharingDecision } from "../access-conformance.ts";
@@ -97,8 +97,32 @@ const LISTING_CONCURRENCY = 8;
 
 /** Hydrate (resolve shortcut, fetch missing ACL) → map → guarded ingest. Returns facts written. */
 async function ingestDriveFile(cfg: GdriveApiConfig, file: DriveFile, pipelineId: string): Promise<number> {
-  const batch = driveFileToBatch(await hydrateFile(cfg, file));
+  const hydrated = await hydrateFile(cfg, file);
+  const batch = driveFileToBatch(hydrated);
   if (!batch.items.length) return 0;
+  // Revocation: a grant that vanished from the ACL is retracted, or the graph keeps a phantom
+  // can-access edge forever (adds alone never remove). Diff ONLY against a really-known ACL — a
+  // permission fetch failure leaves `permissions` unset (hydrateFile), and diffing against that
+  // would revoke every stored grant.
+  if (batch.kind === "document" && Array.isArray(hydrated.permissions)) {
+    const incoming = new Set<number>();
+    for (const item of batch.items) {
+      if ("fact" in item && item.fact.predicate === "can-access" && "node" in item.fact.object) incoming.add(item.fact.object.node);
+    }
+    let stored: number[] = [];
+    try {
+      await guardDb.ensureAuthed();
+      stored = await guardDb.expand(nid("Document", hydrated.id), "can-access");
+    } catch (e) {
+      // the very first Drive batch defines the predicate itself — nothing stored yet
+      if (!(e as Error).message.includes("unknown predicate")) throw e;
+    }
+    const retractions = grantRetractions(nid("Document", hydrated.id), incoming, stored);
+    if (retractions.length) {
+      batch.items.push(...retractions);
+      console.log(`  gdrive: ${batch.summary}, ${retractions.length} grants revoked`);
+    }
+  }
   const { repairs } = await repairLateArrivals(guardDb, sink, batch.items, { pipelineId });
   logRepairs(pipelineId, repairs);
   return batch.factCount;
