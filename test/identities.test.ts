@@ -1,12 +1,12 @@
 // Unit tests for the deterministic half of identity resolution (src/identities.ts): Person id-band
-// classification, cross-band candidate pairing, and the bulk-confirm selection. Pure functions —
-// no engine, no server.
+// classification, cross-band candidate pairing, and the bulk-confirm / policy auto-apply
+// selections. Pure functions — no engine, no server.
 //
 // Run: pnpm test   (tsx --test)
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { pairPersons, personBand, selectEmailExact, type Candidate, type PersonInfo } from "../src/identities.ts";
+import { pairPersons, personBand, selectEmailExact, selectPolicyTargets, type Candidate, type PersonInfo } from "../src/identities.ts";
 
 // Band anchors (src/backlog.ts BASE.Person, src/gdrive.ts BAND.Person)
 const HR_ID = 42;
@@ -124,4 +124,24 @@ test("selectEmailExact: empty when nothing is open", () => {
   const name = candidate(HR_ID, DRIVE_ID, "name");
   const dismissed = candidate(HR_ID + 1, BACKLOG_ID, "email");
   assert.deepEqual(selectEmailExact([name, dismissed], [[HR_ID + 1, BACKLOG_ID]]), []);
+});
+
+// --- selectPolicyTargets: the email-exact policy's auto-apply selection ---
+
+test("selectPolicyTargets: an active policy targets exactly the selectEmailExact set", () => {
+  const candidates = [
+    candidate(HR_ID, BACKLOG_ID, "email"),
+    candidate(HR_ID + 1, DRIVE_ID, "name"),
+    candidate(HR_ID + 2, BACKLOG_ID + 1, "email", true),
+    candidate(HR_ID + 3, DRIVE_ID + 1, "email"),
+  ];
+  const dismissed: Array<[number, number]> = [[HR_ID + 3, DRIVE_ID + 1]];
+  const targets = selectPolicyTargets({ decidedAt: 1, reviewer: "alice" }, candidates, dismissed);
+  assert.deepEqual(targets, selectEmailExact(candidates, dismissed));
+  assert.deepEqual(targets, [candidates[0]]);
+});
+
+test("selectPolicyTargets: no policy (never confirmed or revoked) selects nothing", () => {
+  const candidates = [candidate(HR_ID, BACKLOG_ID, "email")];
+  assert.deepEqual(selectPolicyTargets(undefined, candidates, []), []);
 });
