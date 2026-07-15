@@ -20,8 +20,9 @@ const EOCD_SIG = 0x06054b50; // end of central directory
 const CDIR_SIG = 0x02014b50; // central directory file header
 const LOCAL_SIG = 0x04034b50; // local file header
 
-/** One named member's decompressed bytes, or null when the archive has no such member. */
-function readZipMember(buf: Buffer, wanted: string): Buffer | null {
+/** One named member's decompressed bytes, or null when the archive has no such member.
+ *  Exported for xlsx.ts — a .xlsx is the same ZIP container, just with more members. */
+export function readZipMember(buf: Buffer, wanted: string): Buffer | null {
   // The EOCD record is 22 bytes plus a trailing comment — scan backwards for its signature.
   let eocd = -1;
   for (let i = buf.length - 22; i >= 0; i--) {
@@ -57,8 +58,8 @@ function readZipMember(buf: Buffer, wanted: string): Buffer | null {
   return null;
 }
 
-/** The five predefined XML entities plus numeric character references. */
-function decodeEntities(s: string): string {
+/** The five predefined XML entities plus numeric character references. Exported for xlsx.ts. */
+export function decodeEntities(s: string): string {
   if (!s.includes("&")) return s;
   return s.replace(/&(amp|lt|gt|quot|apos|#x[0-9a-fA-F]+|#\d+);/g, (whole, ref: string) => {
     switch (ref) {

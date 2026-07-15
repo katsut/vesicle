@@ -4,10 +4,11 @@
 import express from "express";
 import { randomBytes } from "node:crypto";
 import { authorizeUrl as gdriveAuthorizeUrl, exchangeCode as gdriveExchangeCode, refreshToken as refreshGoogleToken } from "../gdrive-oauth.ts";
-import { DOC_MIME, PDF_MIME, SLIDES_MIME, WORD_MIME, downloadFile, exportDoc, exportPdf, getDrive, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "../gdrive-api.ts";
+import { DOC_MIME, PDF_MIME, SLIDES_MIME, WORD_MIME, XLSX_MIME, downloadFile, exportDoc, exportPdf, getDrive, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "../gdrive-api.ts";
 import { driveFileToBatch, driveRootBatch, grantRetractions, nid, sensitivityLabel } from "../gdrive.ts";
 import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, entityNamesOf, extractClaims, parseKnownEntities, readFamilyEntityKeys, type DocContent, type DocPattern } from "../gdrive-extract.ts";
 import { docxToText } from "../docx.ts";
+import { sheetsToText, xlsxToRows } from "../xlsx.ts";
 import { evaluateSharing, recordSharingReview, type SharingDecision } from "../access-conformance.ts";
 import { callLLM, extractJson } from "../llm.ts";
 import { Stroma } from "../stroma.ts";
@@ -557,7 +558,8 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
         else if (mime === PDF_MIME) doc = { kind: "pdf", base64: (await downloadFile(cfg, file.id)).base64 };
         else if (mime === SLIDES_MIME) doc = { kind: "pdf", base64: (await exportPdf(cfg, file.id)).base64 };
         else if (mime === WORD_MIME) doc = { kind: "text", text: docxToText(Buffer.from((await downloadFile(cfg, file.id)).base64, "base64")) };
-        else throw new Error(`unsupported mimeType ${mime || "(none)"} — only PDF, Google Docs, Slides and Word (.docx) are readable`);
+        else if (mime === XLSX_MIME) doc = { kind: "text", text: sheetsToText(xlsxToRows(Buffer.from((await downloadFile(cfg, file.id)).base64, "base64"))) };
+        else throw new Error(`unsupported mimeType ${mime || "(none)"} — only PDF, Google Docs, Slides, Word (.docx) and Excel (.xlsx) are readable`);
         const claims = await extractClaims(pattern, doc, logicalDocId ? knownEntities : undefined);
         if (logicalDocId) entityNamesOf(claims, knownEntities);
         const batch = claimsToBatch({
