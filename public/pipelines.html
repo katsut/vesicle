@@ -57,6 +57,7 @@
   .pill b{color:var(--fg);font-weight:600}
   .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px color-mix(in oklab,var(--accent) 80%,transparent);flex:none}
   .pill.off{color:var(--mut)} .pill.off .dot{background:var(--mut);box-shadow:none}
+  a.pill{text-decoration:none} a.pill[href]:hover{color:var(--fg)}
   .pill[hidden]{display:none}
   .spacer{flex:1}
   .ctls{display:flex;align-items:center;gap:8px}
@@ -114,7 +115,7 @@
   <span class="mark"><span class="dot"></span>Vesicle</span>
   <div id="vnav"></div>
   <span class="spacer"></span>
-  <span class="pill off" id="connPill" title="StromaDB"><span class="dot"></span><span id="connText">stroma</span></span>
+  <a class="pill off" id="connPill" title="StromaDB" target="_blank" rel="noopener"><span class="dot"></span><span id="connText">stroma</span></a>
   <div class="ctls">
     <span class="pill" id="userPill" hidden><span data-i18n="signedIn">signed in</span> <b id="userName"></b></span>
     <span class="ctl select"><select id="lang" aria-label="language">
@@ -256,10 +257,12 @@ async function refreshStatus() {
     const s = await jf("/api/status");
     $("#connPill").classList.toggle("off", !s.stroma);
     $("#connPill").title = `StromaDB · ${s.url}`;
+    // reachable → the pill doubles as a link to the engine's own web console
+    if (s.stroma && s.url) $("#connPill").href = s.url; else $("#connPill").removeAttribute("href");
     $("#connText").textContent = s.stroma ? "stroma" : "stroma offline";
     if (s.auth && s.user) { $("#userName").textContent = s.user; $("#userPill").hidden = false; }
   } catch {
-    $("#connPill").classList.add("off"); $("#connText").textContent = "stroma offline";
+    $("#connPill").classList.add("off"); $("#connPill").removeAttribute("href"); $("#connText").textContent = "stroma offline";
   }
 }
 
