@@ -110,6 +110,8 @@
   .rowbtn[disabled]{opacity:.5;cursor:default}
   .idstate{font:600 11px/1 var(--mono);letter-spacing:.04em;padding:4px 9px;border-radius:100px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg-dim);white-space:nowrap}
   .idstate.ok{color:var(--good);border-color:color-mix(in oklab,var(--good) 36%,var(--line));background:color-mix(in oklab,var(--good) 9%,var(--panel-2))}
+  .policycard{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .policycard .q{flex:1;font-weight:600;font-size:13.5px;min-width:220px}
   .cardin.strong{color:var(--accent-2);border-color:color-mix(in oklab,var(--accent) 36%,var(--line));background:color-mix(in oklab,var(--accent) 9%,var(--panel-2))}
   .snip{color:var(--mut);font-size:12.5px}
   .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);z-index:40;background:var(--panel);color:var(--fg);border:1px solid color-mix(in oklab,var(--good) 36%,var(--line));border-radius:var(--r-sm);padding:10px 16px;font-size:13px;box-shadow:var(--bevel),var(--shadow);opacity:0;transition:opacity .18s,transform .18s;pointer-events:none}
@@ -174,6 +176,12 @@ const I18N = {
     id_offline: "StromaDB is not reachable — candidate generation needs the engine.",
     id_confirm_all: "Confirm all exact-email matches ({n})",
     id_bulk_done: "Confirmed {n} exact-email matches",
+    id_policy_q: "Treat accounts sharing an email address as the same person? ({n} open)",
+    id_policy_confirm: "Confirm policy", id_policy_later: "Not now",
+    id_policy_active: "Policy active: exact-email matches auto-confirm.",
+    id_policy_revoke: "Revoke",
+    id_policy_done: "Policy confirmed — applied to {n} pairs",
+    id_policy_revoked: "Policy revoked — auto-confirmation stopped",
     approvals_head: "Approvals",
     ap_tagline: "Deterministic approval candidates — comments whose text matches an approval phrase, no LLM involved. Confirm asserts approved-by / approved-at facts on the issue plus review facts; Dismiss only stops the candidate from being proposed.",
     th_issue: "issue", th_approver: "approver", th_date: "date",
@@ -220,6 +228,12 @@ const I18N = {
     id_offline: "StromaDB に接続できません — 候補の生成にはエンジンが必要です。",
     id_confirm_all: "メール完全一致をすべて確認 ({n})",
     id_bulk_done: "メール完全一致 {n} 組を確認しました",
+    id_policy_q: "同じメールアドレスを持つアカウントを同一人物として扱いますか？（未処理 {n} 組）",
+    id_policy_confirm: "方針を確定", id_policy_later: "今はしない",
+    id_policy_active: "方針が有効: メール完全一致は自動確認されます。",
+    id_policy_revoke: "取り消す",
+    id_policy_done: "方針を確定しました — {n} 組に適用",
+    id_policy_revoked: "方針を取り消しました — 自動確認を停止しました",
     approvals_head: "承認",
     ap_tagline: "決定的な承認候補 — テキストが承認フレーズに一致したコメントで、LLM は使いません。「確認」は課題に approved-by / approved-at ファクトとレビューファクトを書き込み、「却下」はこの候補が提案されなくなるだけです。",
     th_issue: "課題", th_approver: "承認者", th_date: "日付",
@@ -266,6 +280,12 @@ const I18N = {
     id_offline: "无法连接 StromaDB — 生成候选需要引擎。",
     id_confirm_all: "确认所有邮箱完全匹配 ({n})",
     id_bulk_done: "已确认 {n} 组邮箱完全匹配",
+    id_policy_q: "将使用同一邮箱地址的账户视为同一个人？（{n} 组待处理）",
+    id_policy_confirm: "确认策略", id_policy_later: "暂不",
+    id_policy_active: "策略已生效：邮箱完全匹配将自动确认。",
+    id_policy_revoke: "撤销",
+    id_policy_done: "策略已确认 — 已应用到 {n} 组",
+    id_policy_revoked: "策略已撤销 — 停止自动确认",
     approvals_head: "审批",
     ap_tagline: "确定性的审批候选 — 文本命中审批短语的评论，不使用 LLM。「确认」在议题上写入 approved-by / approved-at 事实及审核事实；「忽略」只是不再提议该候选。",
     th_issue: "议题", th_approver: "审批人", th_date: "日期",
@@ -440,10 +460,14 @@ function render() {
 // --- Identities: cross-source Person duplicate candidates (GET /api/identities/candidates).
 // Rows are pre-sorted by the server: unresolved first (email evidence before name), confirmed next,
 // dismissed last (rendered dimmed). Confirm/Dismiss POST /api/identities/resolve, then reload.
-// Exact-email pairs carry identical strong evidence, so the section header offers a one-click
-// "confirm all" (POST /api/identities/confirm-all-email) — the click itself is the verdict, a
-// toast reports the count. Name-token candidates stay individual.
+// Exact-email pairs carry identical mechanical evidence, so the section leads with ONE policy card
+// (POST /api/identities/policy): confirming applies same-as to every open email pair now and keeps
+// auto-confirming future ones; revoking stops the auto-confirmation. While no policy is set the
+// header's one-shot "confirm all" button (POST /api/identities/confirm-all-email) stays as the
+// manual fallback. "Not now" only collapses the card for this page view — nothing is persisted.
+// Name-token candidates stay individual.
 let IDS = { kind: "loading" };
+let POLICY_LATER = false;
 
 let toastTimer = null;
 function toast(msg) {
@@ -477,9 +501,21 @@ function idRow(c) {
   </tr>`;
 }
 
+function policyCard() {
+  const p = IDS.kind === "data" && IDS.policy ? IDS.policy.emailExact : null;
+  if (!p) return "";
+  if (p.active) return `<div class="card policycard"><span class="q">${esc(t("id_policy_active"))}</span>
+    <button class="rowbtn ghost" data-act="policy-revoke">${esc(t("id_policy_revoke"))}</button></div>`;
+  if (!p.openCount || POLICY_LATER) return "";
+  return `<div class="card policycard"><span class="q">${esc(t("id_policy_q", { n: p.openCount }))}</span>
+    <button class="rowbtn" data-act="policy-confirm">${esc(t("id_policy_confirm"))}</button>
+    <button class="rowbtn ghost" data-act="policy-later">${esc(t("id_policy_later"))}</button></div>`;
+}
+
 function renderIdentities() {
   const el = $("#identities"); if (!el) return;
-  const nBulk = IDS.kind === "data"
+  const policyActive = IDS.kind === "data" && IDS.policy && IDS.policy.emailExact.active;
+  const nBulk = IDS.kind === "data" && !policyActive
     ? IDS.candidates.filter((c) => c.evidence === "email" && !c.confirmed && !c.dismissed).length : 0;
   const bulkBtn = nBulk
     ? `<button class="rowbtn" data-act="confirm-all-email">${esc(t("id_confirm_all", { n: nBulk }))}</button>` : "";
@@ -489,7 +525,7 @@ function renderIdentities() {
   if (IDS.kind === "offline") { el.innerHTML = head + `<div class="empty">${esc(t("id_offline"))}</div>`; return; }
   if (IDS.kind === "unauthorized") { el.innerHTML = head + `<div class="err">${t("err_unauthorized")}</div>`; return; }
   if (IDS.kind === "error") { el.innerHTML = head + `<div class="err">${esc(t("err_request", { e: IDS.message }))}</div>`; return; }
-  el.innerHTML = head + (IDS.candidates.length
+  el.innerHTML = head + policyCard() + (IDS.candidates.length
     ? `<div class="tablewrap"><table>
         <thead><tr><th>${t("th_pair")}</th><th>${t("th_evidence")}</th><th>${t("th_state")}</th></tr></thead>
         <tbody>${IDS.candidates.map(idRow).join("")}</tbody></table></div>`
@@ -503,7 +539,8 @@ async function loadIdentities() {
     if (r.status === 401) { IDS = { kind: "unauthorized" }; renderIdentities(); return; }
     const j = await r.json().catch(() => null);
     if (!r.ok || !j) { IDS = { kind: "error", message: (j && j.error) || `HTTP ${r.status}` }; renderIdentities(); return; }
-    IDS = { kind: "data", candidates: Array.isArray(j.candidates) ? j.candidates : [] };
+    IDS = { kind: "data", candidates: Array.isArray(j.candidates) ? j.candidates : [],
+      policy: j.policy && j.policy.emailExact ? j.policy : null };
   } catch (e) {
     IDS = { kind: "error", message: e.message };
   }
@@ -515,10 +552,20 @@ async function loadIdentities() {
 $("#identities").addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button[data-act]");
   if (!btn) return;
+  if (btn.dataset.act === "policy-later") { POLICY_LATER = true; renderIdentities(); return; }
   btn.disabled = true;
   const reviewer = $("#userPill").hidden ? "reviewer" : ($("#userName").textContent || "reviewer");
   try {
-    if (btn.dataset.act === "confirm-all-email") {
+    if (btn.dataset.act === "policy-confirm" || btn.dataset.act === "policy-revoke") {
+      const action = btn.dataset.act === "policy-confirm" ? "confirm" : "revoke";
+      const r = await fetch("/api/identities/policy", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ evidenceClass: "email-exact", action, reviewer }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j) throw new Error((j && j.error) || `HTTP ${r.status}`);
+      toast(action === "confirm" ? t("id_policy_done", { n: j.confirmed }) : t("id_policy_revoked"));
+    } else if (btn.dataset.act === "confirm-all-email") {
       const r = await fetch("/api/identities/confirm-all-email", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ reviewer }),

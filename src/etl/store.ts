@@ -118,6 +118,9 @@ export interface ConnectorConfig {
   /** identity candidate pairs a human dismissed, each ordered [low, high] — the candidates endpoint
    *  keeps proposing everything else (a non-identity is not a graph fact, so it lives here) */
   dismissedIdentityPairs?: Array<[number, number]>;
+  /** confirmed identity policies, keyed by evidence class — an entry's presence makes that class
+   *  auto-confirm on the candidates scan; revoking deletes the entry (facts already written stay) */
+  identityPolicies?: { emailExact?: { decidedAt: number; reviewer?: string } };
   /** approval candidates a human dismissed, each a [commentId, issueId] pair — same rationale as
    *  dismissedIdentityPairs (a non-approval is not a graph fact, so it lives here) */
   dismissedApprovals?: Array<[number, number]>;
@@ -160,6 +163,7 @@ export function loadConfig(): ConnectorConfig {
     pipelines: raw.pipelines ?? [],
     runs: raw.runs ?? [],
     dismissedIdentityPairs: raw.dismissedIdentityPairs ?? [],
+    identityPolicies: raw.identityPolicies ?? {},
     dismissedApprovals: raw.dismissedApprovals ?? [],
     dismissedPatterns: raw.dismissedPatterns ?? [],
   };

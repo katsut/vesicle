@@ -98,6 +98,16 @@ export function selectEmailExact(candidates: Candidate[], dismissed: ReadonlyArr
   );
 }
 
+/** Pure selection for the email-exact policy's auto-apply: an active policy targets exactly the
+ *  bulk-confirm set (selectEmailExact); no policy, no targets. */
+export function selectPolicyTargets(
+  policy: { decidedAt: number; reviewer?: string } | undefined,
+  candidates: Candidate[],
+  dismissed: ReadonlyArray<[number, number]>,
+): Candidate[] {
+  return policy ? selectEmailExact(candidates, dismissed) : [];
+}
+
 /** A text property out of the node-detail response ({props: [{predicate, card, value|values}]}).
  *  Tolerant of the value arriving wrapped ({text: …}) or as a bare string. */
 function propText(detail: Record<string, unknown>, predicate: string): string | null {
