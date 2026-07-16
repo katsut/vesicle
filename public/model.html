@@ -201,6 +201,7 @@ const I18N = {
     tmpl_issue_assignee: "Issue assignment",
     tmpl_comment_author: "Comment authors",
     tmpl_doc_access: "Document access",
+    tmpl_doc_access_scope: "Scope-wide access",
     pat_promote: "Promote to rule", pat_risk: "Record as risk", pat_dismiss: "Dismiss",
     pat_exceptions: "{n} exceptions",
     pat_exceptions_more: "+{n} more not shown",
@@ -257,6 +258,7 @@ const I18N = {
     tmpl_issue_assignee: "課題の担当",
     tmpl_comment_author: "コメントの書き手",
     tmpl_doc_access: "文書アクセス",
+    tmpl_doc_access_scope: "スコープ全体アクセス",
     pat_promote: "ルールに昇格", pat_risk: "リスクとして記録", pat_dismiss: "却下",
     pat_exceptions: "例外 {n} 件",
     pat_exceptions_more: "他 {n} 件は省略",
@@ -313,6 +315,7 @@ const I18N = {
     tmpl_issue_assignee: "议题指派",
     tmpl_comment_author: "评论作者",
     tmpl_doc_access: "文档访问",
+    tmpl_doc_access_scope: "全范围访问",
     pat_promote: "提升为规则", pat_risk: "记为风险", pat_dismiss: "忽略",
     pat_exceptions: "{n} 个例外",
     pat_exceptions_more: "还有 {n} 个未显示",
@@ -709,7 +712,7 @@ $("#approvals").addEventListener("click", async (ev) => {
 // then reload.
 let PATS = { kind: "loading" };
 
-const TMPL_KEY = { "issue-assignee": "tmpl_issue_assignee", "comment-author": "tmpl_comment_author", "doc-access": "tmpl_doc_access" };
+const TMPL_KEY = { "issue-assignee": "tmpl_issue_assignee", "comment-author": "tmpl_comment_author", "doc-access": "tmpl_doc_access", "doc-access-scope": "tmpl_doc_access_scope" };
 
 function patCard(c) {
   const period = c.windowFrom

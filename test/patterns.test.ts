@@ -1,12 +1,12 @@
 // Unit tests for the deterministic pattern miner (src/patterns.ts): threshold gating, the greedy
-// target selection, exception listing and capping, the observation window, and pattern-id
-// stability. Pure functions — no engine, no server.
+// target selection, exception listing and capping, the observation window, pattern-id stability,
+// and the scope-ubiquity demotion. Pure functions — no engine, no server.
 //
 // Run: pnpm test   (tsx --test)
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { EXCEPTION_CAP, MIN_GROUP_SIZE, minePattern, patternId, type EventObs } from "../src/patterns.ts";
+import { EXCEPTION_CAP, MIN_GROUP_SIZE, minePattern, patternId, splitUbiquitousTargets, type EventObs } from "../src/patterns.ts";
 
 // Target ids stand in for Person nodes (generic names, per the display layer): Alice, Bob, Carol.
 const ALICE = 101;
@@ -114,4 +114,83 @@ test("patternId: stable for the same (template, group, predicate), distinct othe
   assert.notEqual(patternId("comment-author", 42, "assigned-to"), id);
   assert.notEqual(patternId("issue-assignee", 43, "assigned-to"), id);
   assert.notEqual(patternId("issue-assignee", 42, "commented-by"), id);
+});
+
+// --- scope-ubiquity demotion -------------------------------------------------------------------
+
+const ADMIN = 100;
+
+/** Folder groups: 3 folders × 5 docs. ADMIN is on every doc except doc 15; each folder also has
+ *  its own person (Alice/Bob/Carol) on 4 of its 5 docs. */
+function driveShape(): Map<number, EventObs[]> {
+  const folder = (from: number, local: number, adminMiss?: number): EventObs[] =>
+    Array.from({ length: 5 }, (_, i) => {
+      const doc = from + i;
+      const targets = doc === adminMiss ? [] : [ADMIN];
+      if (i < 4) targets.push(local);
+      return ev(doc, targets, 1000 + doc);
+    });
+  return new Map([
+    [1, folder(1, ALICE)],
+    [2, folder(6, BOB)],
+    [3, folder(11, CAROL, 15)],
+  ]);
+}
+
+test("splitUbiquitousTargets: a target on ≥90% of all documents is demoted to one scope pattern", () => {
+  const { groups, scope } = splitUbiquitousTargets(driveShape());
+  // ADMIN reaches 14 of 15 documents (≥ 0.9) → ONE scope-level statement, not three folder wins
+  assert.equal(scope.length, 1);
+  assert.deepEqual(scope[0], {
+    target: ADMIN,
+    support: 14,
+    total: 15,
+    exceptions: [15], // the one document ADMIN cannot reach
+    exceptionsOmitted: 0,
+    windowFrom: 1001,
+    windowTo: 1015,
+  });
+  // ADMIN is stripped from every folder event; the events themselves stay in the denominators
+  for (const events of groups.values()) {
+    assert.equal(events.length, 5);
+    for (const e of events) assert.ok(!e.targets.includes(ADMIN));
+  }
+  // the folder-specific people are untouched
+  assert.deepEqual(groups.get(1)!.map((e) => e.targets), [[ALICE], [ALICE], [ALICE], [ALICE], []]);
+});
+
+test("splitUbiquitousTargets: below the threshold nothing is demoted", () => {
+  // ADMIN on 13 of 15 (0.867 < 0.9) — folder mining keeps seeing the full target lists
+  const shape = driveShape();
+  shape.get(1)![0]!.targets.shift(); // remove ADMIN from doc 1 → 13/15
+  const { groups, scope } = splitUbiquitousTargets(shape);
+  assert.deepEqual(scope, []);
+  assert.equal(groups, shape); // untouched, same map
+});
+
+test("splitUbiquitousTargets: fewer than MIN_GROUP_SIZE documents in total never demotes", () => {
+  // 9 docs ALL covered by ADMIN — perfect ubiquity, but too small a population to call it
+  const shape = new Map([[1, Array.from({ length: MIN_GROUP_SIZE - 1 }, (_, i) => ev(i + 1, [ADMIN]))]]);
+  const { scope } = splitUbiquitousTargets(shape);
+  assert.deepEqual(scope, []);
+});
+
+test("splitUbiquitousTargets: multiple ubiquitous targets each get one scope pattern, widest first", () => {
+  const shape = new Map([
+    [1, Array.from({ length: 10 }, (_, i) => ev(i + 1, i === 9 ? [ADMIN] : [ADMIN, ALICE]))],
+  ]);
+  const { scope } = splitUbiquitousTargets(shape);
+  assert.deepEqual(scope.map((s) => [s.target, s.support]), [[ADMIN, 10], [ALICE, 9]]);
+});
+
+test("splitUbiquitousTargets: folder mining then surfaces the next concentration", () => {
+  // Before demotion ADMIN (10/10) wins the greedy pick; after, Alice's 8/10 is the candidate
+  const events = Array.from({ length: 10 }, (_, i) => ev(i + 1, i < 8 ? [ADMIN, ALICE] : [ADMIN]));
+  const { groups } = splitUbiquitousTargets(new Map([[1, events]]));
+  const m = minePattern(groups.get(1)!);
+  assert.ok(m);
+  assert.deepEqual(m.targets, [ALICE]);
+  assert.equal(m.support, 8);
+  assert.equal(m.total, 10);
+  assert.deepEqual(m.exceptions, [9, 10]);
 });
