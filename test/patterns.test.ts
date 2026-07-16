@@ -1,12 +1,13 @@
 // Unit tests for the deterministic pattern miner (src/patterns.ts): threshold gating, the greedy
 // target selection, exception listing and capping, the observation window, pattern-id stability,
-// and the scope-ubiquity demotion. Pure functions — no engine, no server.
+// the scope-ubiquity demotion, and the temporal stability trace. Pure functions — no engine, no
+// server.
 //
 // Run: pnpm test   (tsx --test)
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { EXCEPTION_CAP, MIN_GROUP_SIZE, minePattern, patternId, splitUbiquitousTargets, type EventObs } from "../src/patterns.ts";
+import { EXCEPTION_CAP, MAX_TRACE_POINTS, MIN_GROUP_SIZE, minePattern, monthlyPoints, patternId, splitUbiquitousTargets, stabilityTrace, type EventObs } from "../src/patterns.ts";
 
 // Target ids stand in for Person nodes (generic names, per the display layer): Alice, Bob, Carol.
 const ALICE = 101;
@@ -193,4 +194,60 @@ test("splitUbiquitousTargets: folder mining then surfaces the next concentration
   assert.equal(m.support, 8);
   assert.equal(m.total, 10);
   assert.deepEqual(m.exceptions, [9, 10]);
+});
+
+// --- temporal stability trace -------------------------------------------------------------------
+
+const utc = (y: number, mo: number, d = 1): number => Date.UTC(y, mo - 1, d) / 1000;
+
+test("monthlyPoints: UTC month starts inside the window, ends included", () => {
+  // window 2026-01-15 .. 2026-04-10 → the month starts strictly inside it
+  assert.deepEqual(monthlyPoints(utc(2026, 1, 15), utc(2026, 4, 10)), [utc(2026, 2), utc(2026, 3), utc(2026, 4)]);
+  // a window that starts exactly ON a month start keeps that point
+  assert.deepEqual(monthlyPoints(utc(2026, 2), utc(2026, 3, 20)), [utc(2026, 2), utc(2026, 3)]);
+});
+
+test("monthlyPoints: windows too short for a month boundary, or invalid, yield nothing", () => {
+  assert.deepEqual(monthlyPoints(utc(2026, 1, 2), utc(2026, 1, 30)), []); // no boundary inside
+  assert.deepEqual(monthlyPoints(0, utc(2026, 1)), []); // unreported window
+  assert.deepEqual(monthlyPoints(utc(2026, 2), utc(2026, 1)), []); // inverted
+});
+
+test("monthlyPoints: long windows keep only the most recent MAX_TRACE_POINTS months", () => {
+  const points = monthlyPoints(utc(2020, 1), utc(2026, 6, 15));
+  assert.equal(points.length, MAX_TRACE_POINTS);
+  assert.equal(points[points.length - 1], utc(2026, 6)); // the recent end survives the cap
+  assert.equal(points[0], utc(2023, 7)); // 36 months back from 2026-06 inclusive
+});
+
+test("stabilityTrace: held months, a wobble month naming its actual holder, empty months neutral", () => {
+  const months = [
+    { at: utc(2026, 1), values: [ALICE, ALICE, ALICE, ALICE, BOB] }, // 4/5 → held
+    { at: utc(2026, 2), values: [BOB, BOB, BOB, ALICE, null] }, // 1/4 → wobble, Bob holds
+    { at: utc(2026, 3), values: [null, null, null, null, null] }, // nobody existed yet → neutral
+    { at: utc(2026, 4), values: [ALICE, ALICE, ALICE, ALICE, ALICE] }, // restored
+  ];
+  const tr = stabilityTrace(months, [ALICE]);
+  assert.equal(tr.measured, 3); // the empty month is not measured
+  assert.equal(tr.held, 2);
+  assert.deepEqual(tr.slices.map((s) => s.held), [true, false, false, true]);
+  assert.deepEqual(tr.slices.map((s) => s.top), [null, BOB, null, null]); // holder named only on wobble
+  assert.equal(tr.slices[1]!.population, 4); // nulls shrink the denominator, never count against S
+  assert.equal(tr.slices[1]!.covered, 1);
+});
+
+test("stabilityTrace: coverage exactly at the threshold holds; top ties break to the smaller id", () => {
+  const at = utc(2026, 1);
+  // 4 of 5 on the set = 0.8 → held
+  assert.equal(stabilityTrace([{ at, values: [ALICE, ALICE, ALICE, ALICE, BOB] }], [ALICE]).held, 1);
+  // wobble with BOB and CAROL at 2 apiece → the smaller id wins the "top" slot
+  const tr = stabilityTrace([{ at, values: [BOB, BOB, CAROL, CAROL, ALICE] }], [ALICE]);
+  assert.equal(tr.slices[0]!.top, BOB);
+});
+
+test("stabilityTrace: a two-target set covers with either member", () => {
+  const at = utc(2026, 1);
+  const tr = stabilityTrace([{ at, values: [ALICE, BOB, ALICE, BOB, CAROL] }], [ALICE, BOB]);
+  assert.equal(tr.slices[0]!.covered, 4);
+  assert.equal(tr.held, 1);
 });
