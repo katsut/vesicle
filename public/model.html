@@ -74,6 +74,13 @@
   .chips{display:flex;flex-wrap:wrap;gap:7px}
   .etype{font-size:12.5px;background:var(--sky-soft);color:var(--sky);border:1px solid color-mix(in oklab,var(--sky) 30%,var(--line));border-radius:20px;padding:4px 11px;font-weight:600}
   .maprow{font-family:var(--mono);font-size:11.5px;color:var(--fg-dim);background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+  /* stability strip: one cell per monthly as-of slice — covered / wobble / no data */
+  .stab{display:flex;align-items:center;gap:2px;margin-top:10px;flex-wrap:wrap}
+  .stab i{width:7px;height:14px;border-radius:2px;background:var(--accent);opacity:.9;flex:none}
+  .stab i.wob{background:var(--clay)}
+  .stab i.nul{background:var(--line);height:7px}
+  .stab .sum{font-size:12px;color:var(--fg-dim);margin-left:7px}
+  .stab .wobtxt{font:11.5px var(--mono);color:var(--clay);margin-left:7px}
   .maprow b{color:var(--accent-2)}
   .tablewrap{overflow-x:auto;background:var(--panel-grad);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--bevel),var(--shadow)}
   table{border-collapse:collapse;width:100%;min-width:560px;font-size:13px}
@@ -205,6 +212,8 @@ const I18N = {
     pat_promote: "Promote to rule", pat_risk: "Record as risk", pat_dismiss: "Dismiss",
     pat_exceptions: "{n} exceptions",
     pat_exceptions_more: "+{n} more not shown",
+    pat_stab_summary: "covered in {h} of {m} months",
+    pat_stab_sampled: "(sampled)",
     pat_empty: "no candidates",
     pat_offline: "StromaDB is not reachable — candidate generation needs the engine.",
   },
@@ -262,6 +271,8 @@ const I18N = {
     pat_promote: "ルールに昇格", pat_risk: "リスクとして記録", pat_dismiss: "却下",
     pat_exceptions: "例外 {n} 件",
     pat_exceptions_more: "他 {n} 件は省略",
+    pat_stab_summary: "{m}ヶ月中 {h}ヶ月をカバー",
+    pat_stab_sampled: "（サンプリング）",
     pat_empty: "候補はありません",
     pat_offline: "StromaDB に接続できません — 候補の生成にはエンジンが必要です。",
   },
@@ -319,6 +330,8 @@ const I18N = {
     pat_promote: "提升为规则", pat_risk: "记为风险", pat_dismiss: "忽略",
     pat_exceptions: "{n} 个例外",
     pat_exceptions_more: "还有 {n} 个未显示",
+    pat_stab_summary: "{m}个月中{h}个月被覆盖",
+    pat_stab_sampled: "（抽样）",
     pat_empty: "没有候选",
     pat_offline: "无法连接 StromaDB — 生成候选需要引擎。",
   },
@@ -725,6 +738,10 @@ function patCard(c) {
         <div class="inner"><div class="chips">${c.exceptions.map((e) => `<span class="maprow">${esc(clip(String(e.name ?? e.id), 80))}</span>`).join("")}${
           c.exceptionsOmitted ? `<span class="snip">${esc(t("pat_exceptions_more", { n: c.exceptionsOmitted }))}</span>` : ""}</div></div></details>`
     : "";
+  // stability strip mount — event-based templates only (the as-of read is One-cardinality)
+  const stab = c.template === "issue-assignee" || c.template === "comment-author"
+    ? `<div class="stab" data-stab="${esc(c.patternId)}"><span class="snip">${esc(t("loading"))}</span></div>`
+    : "";
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
       <span class="cardin">${esc(t(TMPL_KEY[c.template] ?? c.template))}</span>
@@ -733,6 +750,7 @@ function patCard(c) {
       <span class="snip">${esc(period)}</span>
     </div>
     <div class="chips" style="margin-top:9px"><span class="maprow"><b>${esc(c.predicate)}</b></span>${chips}</div>
+    ${stab}
     ${exceptions}
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       <button class="rowbtn" data-act="promote" data-id="${esc(c.patternId)}">${esc(t("pat_promote"))}</button>
@@ -753,6 +771,48 @@ function renderPatterns() {
   el.innerHTML = head + (PATS.candidates.length
     ? PATS.candidates.map(patCard).join("")
     : `<div class="empty">${esc(t("pat_empty"))}</div>`);
+  // stability strips fill in AFTER the cards render — a trace costs month×event as-of reads
+  // server-side and must never gate the listing itself
+  el.querySelectorAll("[data-stab]").forEach(loadStability);
+}
+
+// One candidate's monthly as-of trace → a compact strip: ▮ month covered by the current set,
+// ▮(amber) wobble with the actual holder in the tooltip and the wobble ranges spelled out,
+// ▪ no population that month. Fewer than 2 measured months says nothing — the strip disappears.
+async function loadStability(mount) {
+  const ym = (at) => new Date(at * 1000).toISOString().slice(0, 7);
+  try {
+    const r = await fetch(`/api/patterns/stability?patternId=${encodeURIComponent(mount.dataset.stab)}`);
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j) throw new Error((j && j.error) || `HTTP ${r.status}`);
+    if (!j.supported || !Array.isArray(j.slices) || j.measured < 2) { mount.remove(); return; }
+    const cells = j.slices.map((s) => {
+      if (!s.population) return `<i class="nul" title="${esc(ym(s.at))}"></i>`;
+      if (s.held) return `<i title="${esc(`${ym(s.at)}: ${s.covered}/${s.population}`)}"></i>`;
+      const who = s.top ? String(s.top.name ?? s.top.id) : "?";
+      return `<i class="wob" title="${esc(`${ym(s.at)}: ${who} (${s.covered}/${s.population})`)}"></i>`;
+    }).join("");
+    // consecutive wobble months under the same holder read as one range: "2023-07..2023-09 Bob"
+    const runs = [];
+    let prevWob = false;
+    for (const s of j.slices) {
+      const wob = s.population > 0 && !s.held;
+      if (wob) {
+        const who = s.top ? String(s.top.name ?? s.top.id) : "?";
+        const last = runs[runs.length - 1];
+        if (prevWob && last && last.who === who) last.to = ym(s.at);
+        else runs.push({ from: ym(s.at), to: ym(s.at), who });
+      }
+      prevWob = wob;
+    }
+    const wobtxt = runs.length
+      ? `<span class="wobtxt">${esc(clip(runs.map((x) => `${x.from}${x.to !== x.from ? `..${x.to}` : ""} ${x.who}`).join(" · "), 120))}</span>`
+      : "";
+    mount.innerHTML = `${cells}<span class="sum">${esc(t("pat_stab_summary", { h: j.held, m: j.measured }))}${j.sampled ? ` ${esc(t("pat_stab_sampled"))}` : ""}</span>${wobtxt}`;
+  } catch (e) {
+    console.warn(`stability trace ${mount.dataset.stab}: ${e.message}`);
+    mount.remove(); // the strip is progressive enhancement — a failed trace never breaks the card
+  }
 }
 
 async function loadPatterns() {

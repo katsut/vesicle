@@ -4,9 +4,12 @@
 // no new engine machinery, no persisted derived state; a candidate is worth surfacing only when
 // "rule + exceptions" describes the events more compactly than the raw list, which the coverage
 // threshold approximates. Doc-access targets that reach (nearly) every document in the scan are
-// demoted to ONE scope-level candidate before per-folder mining (UBIQUITY_THRESHOLD). A human
-// promotes each candidate to a rule, records it as a risk, or dismisses it (routes/patterns.ts) —
-// the same review idiom as src/identities.ts / src/approvals.ts.
+// demoted to ONE scope-level candidate before per-folder mining (UBIQUITY_THRESHOLD). A candidate's
+// counts are a CURRENT-state snapshot; the stability trace (monthlyPoints/stabilityTrace) re-reads
+// the same pattern at monthly as-of points so a reviewer sees interruptions — a restored wobble is
+// evidence FOR promotion, an unexplained drift argues for risk. A human promotes each candidate to
+// a rule, records it as a risk, or dismisses it (routes/patterns.ts) — the same review idiom as
+// src/identities.ts / src/approvals.ts.
 
 import type { Stroma } from "./stroma.ts";
 import type { BatchItem } from "./etl/types.ts";
@@ -26,6 +29,11 @@ export const EXCEPTION_CAP = 20;
  *  from per-folder greedy selection and reported once as a single scope-level candidate — "P can
  *  reach everything" is ONE scope statement, not N folder rules. */
 export const UBIQUITY_THRESHOLD = 0.9;
+/** Monthly as-of sample points per stability trace — at most this many, the window's most recent. */
+export const MAX_TRACE_POINTS = 36;
+/** Events sliced per stability trace when a group is larger (most recent kept) — every extra event
+ *  costs one as-of read PER MONTH, so the cap bounds the whole trace at ~cap×points reads. */
+export const TRACE_EVENT_CAP = 300;
 
 /** Same node budget as the approvals scan — the widest existing read-time scan. */
 const GRAPH_NODE_BUDGET = 6000;
@@ -159,6 +167,68 @@ export function splitUbiquitousTargets(groups: Map<number, EventObs[]>): { group
   return { groups: filtered, scope };
 }
 
+// --- temporal stability (as-of slices) --------------------------------------------------------------
+
+/** UTC month-start instants covering [from, to], most recent `cap` only. A window too short to
+ *  contain a month boundary yields [] — one sample point says nothing about stability. */
+export function monthlyPoints(from: number, to: number, cap = MAX_TRACE_POINTS): number[] {
+  if (from <= 0 || to < from) return [];
+  const monthStart = (k: number): number => Date.UTC(Math.floor(k / 12), k % 12, 1) / 1000;
+  const d = new Date(from * 1000);
+  let k = d.getUTCFullYear() * 12 + d.getUTCMonth();
+  if (monthStart(k) < from) k++; // first month-start at or after `from`
+  const points: number[] = [];
+  for (; monthStart(k) <= to; k++) points.push(monthStart(k));
+  return points.slice(-cap);
+}
+
+/** One monthly as-of slice: of the events that had ANY value in effect at `at`, how many named a
+ *  target in S, whether S held the month (MIN_COVERAGE), and — when it did not — who actually held
+ *  it (the most frequent as-of value, ties to the smaller id). */
+export interface StabilitySlice {
+  at: number;
+  population: number;
+  covered: number;
+  held: boolean;
+  top: number | null;
+}
+
+export interface StabilityTrace {
+  slices: StabilitySlice[];
+  /** months with any population */
+  measured: number;
+  /** of those, months where S reached MIN_COVERAGE */
+  held: number;
+}
+
+/** Assemble a trace from per-month as-of values (null = the event had no value in effect — not
+ *  yet created, or between holders). Unlike current-state mining, an empty slot shrinks the month's
+ *  denominator instead of counting against coverage: "not yet existing" and "unassigned" are
+ *  indistinguishable in an as-of point read, and a month before the group existed must not read as
+ *  a wobble. Months with no population count in neither `measured` nor `held`. */
+export function stabilityTrace(monthly: Array<{ at: number; values: Array<number | null> }>, targets: number[]): StabilityTrace {
+  const s = new Set(targets);
+  const slices = monthly.map(({ at, values }): StabilitySlice => {
+    const present = values.filter((v): v is number => v != null);
+    const covered = present.filter((v) => s.has(v)).length;
+    const held = present.length > 0 && covered / present.length >= MIN_COVERAGE;
+    let top: number | null = null;
+    if (present.length && !held) {
+      const freq = new Map<number, number>();
+      for (const v of present) freq.set(v, (freq.get(v) ?? 0) + 1);
+      for (const [v, n] of freq) {
+        if (top == null || n > freq.get(top)! || (n === freq.get(top)! && v < top)) top = v;
+      }
+    }
+    return { at, population: present.length, covered, held, top };
+  });
+  return {
+    slices,
+    measured: slices.filter((x) => x.population > 0).length,
+    held: slices.filter((x) => x.held).length,
+  };
+}
+
 /** Stable candidate identity: (template, group, predicate) hashed the same way as the Drive node
  *  ids (FNV-1a 48). The id deliberately excludes S and the counts, so re-scans and dismissals keep
  *  referring to the same pattern even as its leading targets shift. */
@@ -209,11 +279,21 @@ async function canAccess(db: Stroma, doc: number): Promise<number[]> {
   }
 }
 
-/** Scan the graph and mine all template instantiations. One graph read supplies the node ids
- *  AND the display names (the engine's graph view carries each node's display predicate), then each
- *  event pays 1–2 point reads for its group edge and its P target — the same read pattern as the
+/** One pass over the graph: display names plus the three template populations, grouped. The
+ *  stability route reuses this to reach a candidate's raw events — candidates themselves only
+ *  carry capped exceptions. */
+export interface EventScan {
+  names: Map<number, string | null>;
+  issueGroups: Map<number, EventObs[]>;
+  commentGroups: Map<number, EventObs[]>;
+  docGroups: Map<number, EventObs[]>;
+}
+
+/** Scan the graph into the template populations. One graph read supplies the node ids AND the
+ *  display names (the engine's graph view carries each node's display predicate), then each event
+ *  pays 1–2 point reads for its group edge and its P target — the same read pattern as the
  *  approvals scan. */
-export async function findPatternCandidates(db: Stroma): Promise<PatternCandidate[]> {
+export async function scanEventGroups(db: Stroma): Promise<EventScan> {
   await db.ensureAuthed();
   const g = await db.query({ op: "graph", max_nodes: GRAPH_NODE_BUDGET });
   const nodes = (g.nodes as Array<{ id: number; name?: string }>) ?? [];
@@ -263,7 +343,12 @@ export async function findPatternCandidates(db: Stroma): Promise<PatternCandidat
       push(docGroups, folder, { id: n.id, targets: await canAccess(db, n.id), at: rec.valid_from ?? 0 });
     }
   }
+  return { names, issueGroups, commentGroups, docGroups };
+}
 
+/** Mine all template instantiations from a scan — deterministic given the scan. */
+export function candidatesFromScan(scan: EventScan): PatternCandidate[] {
+  const { names, issueGroups, commentGroups, docGroups } = scan;
   // Scope-ubiquity demotion (doc-access only): a person with grants on (nearly) every scanned
   // document wins the greedy pick for every folder — technically correct, low information. Their
   // reach is emitted ONCE below and they are excluded from per-folder selection, so folder
@@ -311,6 +396,11 @@ export async function findPatternCandidates(db: Stroma): Promise<PatternCandidat
   collect("comment-author", "commented-by", commentGroups);
   collect("doc-access", "can-access", folderDocGroups);
   return out;
+}
+
+/** Scan the graph and mine all template instantiations. */
+export async function findPatternCandidates(db: Stroma): Promise<PatternCandidate[]> {
+  return candidatesFromScan(await scanEventGroups(db));
 }
 
 // --- verdict persistence ---------------------------------------------------------------------------
