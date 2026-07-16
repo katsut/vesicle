@@ -3,8 +3,10 @@
 // carries predicate P to a small target set S (|S| ≤ 2)". Counts only — no learned scores, NO LLM,
 // no new engine machinery, no persisted derived state; a candidate is worth surfacing only when
 // "rule + exceptions" describes the events more compactly than the raw list, which the coverage
-// threshold approximates. A human promotes each candidate to a rule, records it as a risk, or
-// dismisses it (routes/patterns.ts) — the same review idiom as src/identities.ts / src/approvals.ts.
+// threshold approximates. Doc-access targets that reach (nearly) every document in the scan are
+// demoted to ONE scope-level candidate before per-folder mining (UBIQUITY_THRESHOLD). A human
+// promotes each candidate to a rule, records it as a risk, or dismisses it (routes/patterns.ts) —
+// the same review idiom as src/identities.ts / src/approvals.ts.
 
 import type { Stroma } from "./stroma.ts";
 import type { BatchItem } from "./etl/types.ts";
@@ -20,14 +22,19 @@ export const MIN_COVERAGE = 0.8;
 export const MAX_TARGETS = 2;
 /** Exceptions listed per candidate; anything beyond is reported as a count, never silently dropped. */
 export const EXCEPTION_CAP = 20;
+/** A target covering at least this fraction of ALL scanned documents is scope-ubiquitous: excluded
+ *  from per-folder greedy selection and reported once as a single scope-level candidate — "P can
+ *  reach everything" is ONE scope statement, not N folder rules. */
+export const UBIQUITY_THRESHOLD = 0.9;
 
 /** Same node budget as the approvals scan — the widest existing read-time scan. */
 const GRAPH_NODE_BUDGET = 6000;
 
 // --- pure mining (unit-tested) ---------------------------------------------------------------------
 
-/** The three shipped instantiations of the template. */
-export type Template = "issue-assignee" | "comment-author" | "doc-access";
+/** The shipped instantiations of the template. doc-access-scope is the scope-level demotion of
+ *  doc-access: one candidate per ubiquitous person over the whole scan, not per folder. */
+export type Template = "issue-assignee" | "comment-author" | "doc-access" | "doc-access-scope";
 
 /** One observed event: the P targets it carries (empty = the event lacks P and can only be an
  *  exception) and its event time (epoch seconds, 0 when unreported). */
@@ -97,6 +104,61 @@ export function minePattern(events: EventObs[]): MinedPattern | null {
   };
 }
 
+/** One scope-ubiquitous target: its reach over ALL scanned documents, reported once instead of
+ *  winning every per-folder pick. Same evidence shape as MinedPattern minus the target set. */
+export interface ScopePattern {
+  target: number;
+  support: number;
+  total: number;
+  exceptions: number[];
+  exceptionsOmitted: number;
+  windowFrom: number;
+  windowTo: number;
+}
+
+/** Demote scope-ubiquitous targets before per-folder mining. Coverage is counted over the union of
+ *  all groups' events (each document carries one in-folder edge, so the union never double-counts):
+ *  a target on ≥ UBIQUITY_THRESHOLD of them is stripped from every event's target list — the events
+ *  themselves stay, so they still count against per-folder coverage — and returned as one
+ *  ScopePattern, widest reach first (ties to the smaller id). Fewer than MIN_GROUP_SIZE events in
+ *  total is too small a population to call anything ubiquitous. */
+export function splitUbiquitousTargets(groups: Map<number, EventObs[]>): { groups: Map<number, EventObs[]>; scope: ScopePattern[] } {
+  const all = [...groups.values()].flat();
+  if (all.length < MIN_GROUP_SIZE) return { groups, scope: [] };
+  const reach = new Map<number, number>();
+  for (const e of all) {
+    for (const t of new Set(e.targets)) reach.set(t, (reach.get(t) ?? 0) + 1);
+  }
+  const ubiquitous = [...reach.entries()]
+    .filter(([, n]) => n / all.length >= UBIQUITY_THRESHOLD)
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  if (!ubiquitous.length) return { groups, scope: [] };
+  const drop = new Set(ubiquitous.map(([t]) => t));
+  const times = all.map((e) => e.at).filter((t) => t > 0);
+  const windowFrom = times.length ? Math.min(...times) : 0;
+  const windowTo = times.length ? Math.max(...times) : 0;
+  const scope = ubiquitous.map(([target, support]): ScopePattern => {
+    const exceptions = all.filter((e) => !e.targets.includes(target)).map((e) => e.id);
+    return {
+      target,
+      support,
+      total: all.length,
+      exceptions: exceptions.slice(0, EXCEPTION_CAP),
+      exceptionsOmitted: Math.max(0, exceptions.length - EXCEPTION_CAP),
+      windowFrom,
+      windowTo,
+    };
+  });
+  const filtered = new Map<number, EventObs[]>();
+  for (const [group, events] of groups) {
+    filtered.set(
+      group,
+      events.map((e) => (e.targets.some((t) => drop.has(t)) ? { ...e, targets: e.targets.filter((t) => !drop.has(t)) } : e)),
+    );
+  }
+  return { groups: filtered, scope };
+}
+
 /** Stable candidate identity: (template, group, predicate) hashed the same way as the Drive node
  *  ids (FNV-1a 48). The id deliberately excludes S and the counts, so re-scans and dismissals keep
  *  referring to the same pattern even as its leading targets shift. */
@@ -147,7 +209,7 @@ async function canAccess(db: Stroma, doc: number): Promise<number[]> {
   }
 }
 
-/** Scan the graph and mine all three template instantiations. One graph read supplies the node ids
+/** Scan the graph and mine all template instantiations. One graph read supplies the node ids
  *  AND the display names (the engine's graph view carries each node's display predicate), then each
  *  event pays 1–2 point reads for its group edge and its P target — the same read pattern as the
  *  approvals scan. */
@@ -202,8 +264,30 @@ export async function findPatternCandidates(db: Stroma): Promise<PatternCandidat
     }
   }
 
+  // Scope-ubiquity demotion (doc-access only): a person with grants on (nearly) every scanned
+  // document wins the greedy pick for every folder — technically correct, low information. Their
+  // reach is emitted ONCE below and they are excluded from per-folder selection, so folder
+  // candidates surface the NEXT concentration — the actually folder-specific reach.
+  const { groups: folderDocGroups, scope } = splitUbiquitousTargets(docGroups);
+
   const ref = (id: number): NamedRef => ({ id, name: names.get(id) ?? null });
   const out: PatternCandidate[] = [];
+  for (const s of scope) {
+    out.push({
+      // the person carries the pattern identity — no node represents the scan scope itself
+      patternId: patternId("doc-access-scope", s.target, "can-access"),
+      template: "doc-access-scope",
+      group: ref(s.target),
+      predicate: "can-access",
+      targets: [ref(s.target)],
+      support: s.support,
+      total: s.total,
+      exceptions: s.exceptions.map(ref),
+      exceptionsOmitted: s.exceptionsOmitted,
+      windowFrom: s.windowFrom,
+      windowTo: s.windowTo,
+    });
+  }
   const collect = (template: Template, predicate: string, groups: Map<number, EventObs[]>): void => {
     for (const [group, events] of groups) {
       const m = minePattern(events);
@@ -225,7 +309,7 @@ export async function findPatternCandidates(db: Stroma): Promise<PatternCandidat
   };
   collect("issue-assignee", "assigned-to", issueGroups);
   collect("comment-author", "commented-by", commentGroups);
-  collect("doc-access", "can-access", docGroups);
+  collect("doc-access", "can-access", folderDocGroups);
   return out;
 }
 
