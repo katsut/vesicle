@@ -5,7 +5,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { DriveFile } from "../src/gdrive-api.ts";
-import { driveFileToBatch, driveRootBatch, grantRetractions, nid } from "../src/gdrive.ts";
+import { driveFileToBatch, driveRootBatch, grantClosures, nid } from "../src/gdrive.ts";
 
 test("driveRootBatch names the shared drive's root Folder node", () => {
   const items = driveRootBatch("0Aexample", "Team Drive", 1_700_000_000_000);
@@ -42,28 +42,33 @@ test("person-identity facts carry valid_from 0, file facts carry the file's time
   assert.ok(facts.some((f) => f.predicate === "doc-name"));
 });
 
-test("grantRetractions retracts exactly the stored grants missing from the incoming set", () => {
-  const out = grantRetractions(100, new Set([11, 12]), [11, 12, 13, 14]);
+test("grantClosures closes exactly the stored grants missing from the incoming set", () => {
+  const out = grantClosures(100, new Set([11, 12]), [11, 12, 13, 14], 1_700_000_000);
   assert.deepEqual(out, [
-    { retract: { subject: 100, predicate: "can-access", object: { node: 13 } } },
-    { retract: { subject: 100, predicate: "can-access", object: { node: 14 } } },
+    { close: { subject: 100, predicate: "can-access", object: { node: 13 }, valid_from: 1_700_000_000 } },
+    { close: { subject: 100, predicate: "can-access", object: { node: 14 }, valid_from: 1_700_000_000 } },
   ]);
 });
 
-test("grantRetractions is empty when the ACL and the stored grants agree", () => {
-  assert.deepEqual(grantRetractions(100, new Set([21, 22]), [22, 21]), []);
+test("grantClosures is empty when the ACL and the stored grants agree", () => {
+  assert.deepEqual(grantClosures(100, new Set([21, 22]), [22, 21], 1_700_000_000), []);
 });
 
-test("grantRetractions retracts every stored grant when the incoming set is empty", () => {
-  const out = grantRetractions(200, new Set<number>(), [31, 32, 33]);
+test("grantClosures closes every stored grant when the incoming set is empty", () => {
+  const out = grantClosures(200, new Set<number>(), [31, 32, 33], 1_700_000_000);
   assert.deepEqual(out, [
-    { retract: { subject: 200, predicate: "can-access", object: { node: 31 } } },
-    { retract: { subject: 200, predicate: "can-access", object: { node: 32 } } },
-    { retract: { subject: 200, predicate: "can-access", object: { node: 33 } } },
+    { close: { subject: 200, predicate: "can-access", object: { node: 31 }, valid_from: 1_700_000_000 } },
+    { close: { subject: 200, predicate: "can-access", object: { node: 32 }, valid_from: 1_700_000_000 } },
+    { close: { subject: 200, predicate: "can-access", object: { node: 33 }, valid_from: 1_700_000_000 } },
   ]);
 });
 
-test("retract items serialize to the engine's wire shape", () => {
-  const [item] = grantRetractions(300, new Set<number>(), [42]);
-  assert.equal(JSON.stringify(item), '{"retract":{"subject":300,"predicate":"can-access","object":{"node":42}}}');
+test("close items serialize to the engine's wire shape (object = the closed element)", () => {
+  const [item] = grantClosures(300, new Set<number>(), [42], 1_700_000_001);
+  assert.equal(JSON.stringify(item), '{"close":{"subject":300,"predicate":"can-access","object":{"node":42},"valid_from":1700000001}}');
+});
+
+test("driveFileToBatch reports the file-time instant its facts carry (the close stamp)", () => {
+  const file: DriveFile = { id: "doc-2", name: "Spec", mimeType: "application/pdf", modifiedTime: "2026-01-02T03:04:05.000Z" };
+  assert.equal(driveFileToBatch(file).at, Date.parse("2026-01-02T03:04:05.000Z") / 1000);
 });
