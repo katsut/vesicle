@@ -36,9 +36,10 @@ patternsRouter.get("/api/patterns/candidates", async (_req, res) => {
 // GET /api/patterns/stability?patternId= → the candidate's monthly as-of trace. Computed on demand
 // per card, never during the candidates scan: a trace costs one point read per event PER MONTH
 // (bounded by TRACE_EVENT_CAP × MAX_TRACE_POINTS), which is fine for one click and not for a page
-// load of N candidates. Event-based templates only — the engine's valid_at point read covers
-// One-cardinality predicates; doc-access (can-access, Many) answers { supported: false } until an
-// as-of read for Many-cardinality lands upstream.
+// load of N candidates. Event templates slice their One-cardinality predicate (assigned-to /
+// commented-by); doc templates slice each document's as-of can-access grant SET — that read needs
+// an engine with as-of Many support, detected by the echoed valid_at (pointManyAsOf), and answers
+// { supported: false } against an older engine rather than tracing the current set as flat lies.
 patternsRouter.get("/api/patterns/stability", async (req, res) => {
   try {
     const patternId = req.query.patternId;
@@ -53,17 +54,36 @@ patternsRouter.get("/api/patterns/stability", async (req, res) => {
     const scan = await scanEventGroups(db);
     const candidate = candidatesFromScan(scan).find((c) => c.patternId === patternId);
     if (!candidate) return res.status(404).json({ error: `pattern ${patternId} no longer mines as a candidate — reload and re-review` });
-    const groups =
-      candidate.template === "issue-assignee" ? scan.issueGroups : candidate.template === "comment-author" ? scan.commentGroups : null;
-    if (!groups) return res.json({ supported: false });
+    // The traced population: the group's events — for the scope-level template every scanned
+    // document (that is what its counts are over; its "group" is the person, not a container).
+    const many = candidate.template === "doc-access" || candidate.template === "doc-access-scope";
+    const all =
+      candidate.template === "issue-assignee"
+        ? (scan.issueGroups.get(candidate.group.id) ?? [])
+        : candidate.template === "comment-author"
+          ? (scan.commentGroups.get(candidate.group.id) ?? [])
+          : candidate.template === "doc-access"
+            ? (scan.docGroups.get(candidate.group.id) ?? [])
+            : [...scan.docGroups.values()].flat();
     const months = monthlyPoints(candidate.windowFrom, candidate.windowTo);
-    const all = groups.get(candidate.group.id) ?? [];
     // most recent events kept under the cap — the recent past is what a promotion is asserting
     const sampled = all.length > TRACE_EVENT_CAP;
     const events = sampled ? [...all].sort((a, b) => b.at - a.at).slice(0, TRACE_EVENT_CAP) : all;
-    const monthly: Array<{ at: number; values: Array<number | null> }> = [];
+    // Capability probe before paying for the full grid: one as-of Many read tells whether the
+    // engine echoes valid_at. (One-cardinality as-of has been supported since the trace shipped.)
+    if (many && months.length && events.length) {
+      if ((await db.pointManyAsOf(events[0]!.id, candidate.predicate, months[0]!)) == null) {
+        return res.json({ supported: false });
+      }
+    }
+    const monthly: Array<{ at: number; values: number[][] }> = [];
     for (const at of months) {
-      monthly.push({ at, values: await mapPool(events, 16, (e) => db.pointAsOf(e.id, candidate.predicate, at)) });
+      const values = await mapPool(events, 16, async (e): Promise<number[]> => {
+        if (many) return (await db.pointManyAsOf(e.id, candidate.predicate, at)) ?? [];
+        const v = await db.pointAsOf(e.id, candidate.predicate, at);
+        return v != null ? [v] : [];
+      });
+      monthly.push({ at, values });
     }
     const trace = stabilityTrace(monthly, candidate.targets.map((t) => t.id));
     res.json({

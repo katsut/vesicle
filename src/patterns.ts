@@ -182,9 +182,9 @@ export function monthlyPoints(from: number, to: number, cap = MAX_TRACE_POINTS):
   return points.slice(-cap);
 }
 
-/** One monthly as-of slice: of the events that had ANY value in effect at `at`, how many named a
+/** One monthly as-of slice: of the events that had ANY target in effect at `at`, how many named a
  *  target in S, whether S held the month (MIN_COVERAGE), and — when it did not — who actually held
- *  it (the most frequent as-of value, ties to the smaller id). */
+ *  it (the most frequent as-of target, ties to the smaller id). */
 export interface StabilitySlice {
   at: number;
   population: number;
@@ -201,21 +201,27 @@ export interface StabilityTrace {
   held: number;
 }
 
-/** Assemble a trace from per-month as-of values (null = the event had no value in effect — not
- *  yet created, or between holders). Unlike current-state mining, an empty slot shrinks the month's
- *  denominator instead of counting against coverage: "not yet existing" and "unassigned" are
- *  indistinguishable in an as-of point read, and a month before the group existed must not read as
- *  a wobble. Months with no population count in neither `measured` nor `held`. */
-export function stabilityTrace(monthly: Array<{ at: number; values: Array<number | null> }>, targets: number[]): StabilityTrace {
+/** Assemble a trace from per-month as-of target lists — one list per event, mirroring
+ *  EventObs.targets: a One-predicate event contributes zero or one value, a Many-predicate event
+ *  (a document's as-of grant set) any number, and an event is covered when its list intersects S.
+ *  An empty list shrinks the month's denominator instead of counting against coverage — unlike
+ *  current-state mining: "not yet existing" and "unassigned/ungranted" are indistinguishable in an
+ *  as-of read, and a month before the group existed must not read as a wobble. Months with no
+ *  population count in neither `measured` nor `held`. */
+export function stabilityTrace(monthly: Array<{ at: number; values: ReadonlyArray<readonly number[]> }>, targets: number[]): StabilityTrace {
   const s = new Set(targets);
   const slices = monthly.map(({ at, values }): StabilitySlice => {
-    const present = values.filter((v): v is number => v != null);
-    const covered = present.filter((v) => s.has(v)).length;
+    const present = values.filter((list) => list.length > 0);
+    const covered = present.filter((list) => list.some((v) => s.has(v))).length;
     const held = present.length > 0 && covered / present.length >= MIN_COVERAGE;
     let top: number | null = null;
     if (present.length && !held) {
+      // the month's actual holder: mode over each event's DISTINCT targets (an event with many
+      // grantees still votes once per person), ties to the smaller id
       const freq = new Map<number, number>();
-      for (const v of present) freq.set(v, (freq.get(v) ?? 0) + 1);
+      for (const list of present) {
+        for (const v of new Set(list)) freq.set(v, (freq.get(v) ?? 0) + 1);
+      }
       for (const [v, n] of freq) {
         if (top == null || n > freq.get(top)! || (n === freq.get(top)! && v < top)) top = v;
       }

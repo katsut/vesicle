@@ -220,34 +220,59 @@ test("monthlyPoints: long windows keep only the most recent MAX_TRACE_POINTS mon
   assert.equal(points[0], utc(2023, 7)); // 36 months back from 2026-06 inclusive
 });
 
+/** One-predicate shape: zero or one as-of value per event. */
+const one = (values: Array<number | null>): number[][] => values.map((v) => (v != null ? [v] : []));
+
 test("stabilityTrace: held months, a wobble month naming its actual holder, empty months neutral", () => {
   const months = [
-    { at: utc(2026, 1), values: [ALICE, ALICE, ALICE, ALICE, BOB] }, // 4/5 → held
-    { at: utc(2026, 2), values: [BOB, BOB, BOB, ALICE, null] }, // 1/4 → wobble, Bob holds
-    { at: utc(2026, 3), values: [null, null, null, null, null] }, // nobody existed yet → neutral
-    { at: utc(2026, 4), values: [ALICE, ALICE, ALICE, ALICE, ALICE] }, // restored
+    { at: utc(2026, 1), values: one([ALICE, ALICE, ALICE, ALICE, BOB]) }, // 4/5 → held
+    { at: utc(2026, 2), values: one([BOB, BOB, BOB, ALICE, null]) }, // 1/4 → wobble, Bob holds
+    { at: utc(2026, 3), values: one([null, null, null, null, null]) }, // nobody existed yet → neutral
+    { at: utc(2026, 4), values: one([ALICE, ALICE, ALICE, ALICE, ALICE]) }, // restored
   ];
   const tr = stabilityTrace(months, [ALICE]);
   assert.equal(tr.measured, 3); // the empty month is not measured
   assert.equal(tr.held, 2);
   assert.deepEqual(tr.slices.map((s) => s.held), [true, false, false, true]);
   assert.deepEqual(tr.slices.map((s) => s.top), [null, BOB, null, null]); // holder named only on wobble
-  assert.equal(tr.slices[1]!.population, 4); // nulls shrink the denominator, never count against S
+  assert.equal(tr.slices[1]!.population, 4); // empty slots shrink the denominator, never count against S
   assert.equal(tr.slices[1]!.covered, 1);
 });
 
 test("stabilityTrace: coverage exactly at the threshold holds; top ties break to the smaller id", () => {
   const at = utc(2026, 1);
   // 4 of 5 on the set = 0.8 → held
-  assert.equal(stabilityTrace([{ at, values: [ALICE, ALICE, ALICE, ALICE, BOB] }], [ALICE]).held, 1);
+  assert.equal(stabilityTrace([{ at, values: one([ALICE, ALICE, ALICE, ALICE, BOB]) }], [ALICE]).held, 1);
   // wobble with BOB and CAROL at 2 apiece → the smaller id wins the "top" slot
-  const tr = stabilityTrace([{ at, values: [BOB, BOB, CAROL, CAROL, ALICE] }], [ALICE]);
+  const tr = stabilityTrace([{ at, values: one([BOB, BOB, CAROL, CAROL, ALICE]) }], [ALICE]);
   assert.equal(tr.slices[0]!.top, BOB);
 });
 
 test("stabilityTrace: a two-target set covers with either member", () => {
   const at = utc(2026, 1);
-  const tr = stabilityTrace([{ at, values: [ALICE, BOB, ALICE, BOB, CAROL] }], [ALICE, BOB]);
+  const tr = stabilityTrace([{ at, values: one([ALICE, BOB, ALICE, BOB, CAROL]) }], [ALICE, BOB]);
   assert.equal(tr.slices[0]!.covered, 4);
   assert.equal(tr.held, 1);
+});
+
+test("stabilityTrace: many-target events (as-of grant sets) cover on intersection", () => {
+  // doc-access shape: each event is a document's as-of grant set. 4 of 5 docs carry ALICE
+  // somewhere in the set → held even though every set also names others.
+  const at = utc(2026, 1);
+  const months = [
+    { at, values: [[ALICE, BOB], [ALICE], [BOB, ALICE, CAROL], [ALICE], [BOB]] },
+  ];
+  const tr = stabilityTrace(months, [ALICE]);
+  assert.equal(tr.slices[0]!.population, 5);
+  assert.equal(tr.slices[0]!.covered, 4);
+  assert.equal(tr.held, 1);
+});
+
+test("stabilityTrace: a wobble month's holder counts each event once per DISTINCT grantee", () => {
+  // BOB appears twice within one doc's set — still one vote from that doc; across docs BOB (2)
+  // beats CAROL (1), and ALICE covers only 1 of 4 docs → wobble names BOB
+  const at = utc(2026, 1);
+  const tr = stabilityTrace([{ at, values: [[BOB, BOB], [BOB], [CAROL], [ALICE]] }], [ALICE]);
+  assert.equal(tr.slices[0]!.held, false);
+  assert.equal(tr.slices[0]!.top, BOB);
 });
