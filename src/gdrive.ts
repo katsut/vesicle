@@ -111,6 +111,9 @@ export interface GdriveBatch {
   kind: "document" | "folder" | "ignored";
   summary: string;
   factCount: number;
+  /** the file-time instant the batch's facts carry (modifiedTime, epoch seconds; 0 for ignored) —
+   *  the same instant grant closes stamp, so a close never lands before its grant */
+  at: number;
 }
 
 /** Name a shared drive's root Folder node. The root only ever appears as a parent-folder /
@@ -135,7 +138,7 @@ const personKey = (u: { permissionId?: string; id?: string; emailAddress?: strin
  *  no closes for them). */
 export function driveFileToBatch(file: DriveFile): GdriveBatch {
   if (file.mimeType === SHORTCUT_MIME) {
-    return { items: [], kind: "ignored", summary: `shortcut ${file.id} not resolved — skipped`, factCount: 0 };
+    return { items: [], kind: "ignored", summary: `shortcut ${file.id} not resolved — skipped`, factCount: 0, at: 0 };
   }
   const at = isoToEpoch(file.modifiedTime ?? file.createdTime ?? "");
   const nodes: BatchItem[] = [];
@@ -180,6 +183,7 @@ export function driveFileToBatch(file: DriveFile): GdriveBatch {
       kind: "folder",
       summary: `folder "${displayName}" (label ${label})`,
       factCount: facts.length,
+      at,
     };
   }
 
@@ -212,15 +216,20 @@ export function driveFileToBatch(file: DriveFile): GdriveBatch {
     kind: "document",
     summary: `document "${displayName}" (label ${label}, ${grants} user grants)`,
     factCount: facts.length,
+    at,
   };
 }
 
-/** Grants stored in the graph but absent from the fresh ACL — the revoked ones. One retract per
- *  vanished person grant: can-access is cardinality-many, so removal is an observed-remove retract
- *  (a close is for one-cardinality heads). The caller decides WHEN diffing is safe (the ACL must be
- *  actually known, not a failed fetch). */
-export function grantRetractions(docId: number, incomingPersonIds: ReadonlySet<number>, storedPersonIds: readonly number[]): BatchItem[] {
+/** Grants stored in the graph but absent from the fresh ACL — the revoked ones. One temporal close
+ *  per vanished person grant: the grant leaves the current set but its interval stays sliceable
+ *  ("who could access this as of T" keeps the revoked era), unlike a retract, which erases the
+ *  element's history. `at` = the file's modifiedTime at the observing sync — the same instant the
+ *  batch's facts carry, monotone per file, so a close never lands before its grant (a permission
+ *  change that did not bump modifiedTime ties the grant's valid_from and the later write wins — a
+ *  zero-length grant, never a resurrection). The caller decides WHEN diffing is safe (the ACL must
+ *  be actually known, not a failed fetch). */
+export function grantClosures(docId: number, incomingPersonIds: ReadonlySet<number>, storedPersonIds: readonly number[], at: number): BatchItem[] {
   return storedPersonIds
     .filter((pid) => !incomingPersonIds.has(pid))
-    .map((pid) => ({ retract: { subject: docId, predicate: "can-access", object: { node: pid } } }));
+    .map((pid) => ({ close: { subject: docId, predicate: "can-access", object: { node: pid }, valid_from: at } }));
 }

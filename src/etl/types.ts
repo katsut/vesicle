@@ -57,12 +57,16 @@ export interface Retract {
   source?: string;
 }
 
-/** End a cardinality-one value with no successor: head becomes absent; as-of at/after `valid_from`
- *  returns nothing, before it still sees the prior value. Only the event source knows a value ended
- *  (the engine cannot infer cessation), so connectors emit this for field-cleared events. */
+/** End a value's valid-time interval with no successor: as-of at/after `valid_from` returns
+ *  nothing, before it still sees the prior value. Only the event source knows a value ended (the
+ *  engine cannot infer cessation), so connectors emit this for field-cleared / grant-revoked
+ *  events. Cardinality-one closes the key's single value (no `object`); cardinality-many requires
+ *  `object` and closes THAT element's interval — unlike a retract, which erases its history. */
 export interface Close {
   subject: number;
   predicate: string;
+  /** the closed element — required for a cardinality-many predicate, absent for one */
+  object?: FactObject;
   valid_from?: number;
   /** provenance — the sink stamps the pipeline id when unset */
   source?: string;
