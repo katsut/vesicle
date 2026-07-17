@@ -738,10 +738,9 @@ function patCard(c) {
         <div class="inner"><div class="chips">${c.exceptions.map((e) => `<span class="maprow">${esc(clip(String(e.name ?? e.id), 80))}</span>`).join("")}${
           c.exceptionsOmitted ? `<span class="snip">${esc(t("pat_exceptions_more", { n: c.exceptionsOmitted }))}</span>` : ""}</div></div></details>`
     : "";
-  // stability strip mount — event-based templates only (the as-of read is One-cardinality)
-  const stab = c.template === "issue-assignee" || c.template === "comment-author"
-    ? `<div class="stab" data-stab="${esc(c.patternId)}"><span class="snip">${esc(t("loading"))}</span></div>`
-    : "";
+  // stability strip mount — every template; the server answers { supported: false } (and the
+  // strip quietly disappears) when the engine cannot slice the predicate as-of
+  const stab = `<div class="stab" data-stab="${esc(c.patternId)}"><span class="snip">${esc(t("loading"))}</span></div>`;
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
       <span class="cardin">${esc(t(TMPL_KEY[c.template] ?? c.template))}</span>

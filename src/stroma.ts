@@ -132,6 +132,18 @@ export class Stroma {
     return one?.node ?? null;
   }
 
+  /** point(subject, predicate) valid-time as-of `at` for a many-cardinality predicate → the node
+   *  elements in effect at that instant, or NULL when the engine does not support as-of Many reads.
+   *  A supporting server echoes `valid_at` in the answer; an older one silently answers the CURRENT
+   *  set — indistinguishable from a real slice by shape alone, and a trace built on it would be
+   *  flat lies, so the missing echo reads as "unsupported", never as data. */
+  async pointManyAsOf(subject: number, predicate: string, at: number): Promise<number[] | null> {
+    const j = await this.query({ op: "point", subject, predicate, valid_at: at });
+    if (j.valid_at !== at) return null;
+    const many = (j.many as Array<{ node?: number }> | undefined) ?? [];
+    return many.map((v) => v.node).filter((n): n is number => typeof n === "number");
+  }
+
   /** edge_props(subject, predicate, object node) → {key: value} (values unwrapped to JS scalars). */
   async edgeProps(subject: number, predicate: string, object: number): Promise<Record<string, number | string | boolean>> {
     const j = await this.query({ op: "edge_props", subject, predicate, object: { node: object } });
