@@ -82,7 +82,7 @@ async function gdriveConn() {
 
 // PipelineDef.scope is a string — the Drive scope round-trips as "my-drive" | "folder:<id>" | "drive:<id>".
 function parseDriveScope(scope: string | undefined): DriveScope | null {
-  if (!scope) return null;
+  if (!scope || scope.length > 512) return null;
   if (scope === "my-drive") return { kind: "my-drive" };
   if (scope.startsWith("folder:")) return { kind: "folder", id: scope.slice("folder:".length) };
   if (scope.startsWith("drive:")) return { kind: "drive", id: scope.slice("drive:".length) };
@@ -295,6 +295,7 @@ gdriveRouter.post("/api/gdrive/poll/start", (req, res) => {
     if (!loadConfig().sources.gdrive) return res.status(400).json({ error: "not connected to Google Drive" });
     const kind = String(req.body?.scope?.kind ?? "").trim();
     const rawId = String(req.body?.scope?.id ?? "").trim();
+    if (rawId.length > 512) return res.status(400).json({ error: "scope.id is too long" }); // ids and pasted folder URLs both fit well under this
     let scope: DriveScope;
     if (kind === "my-drive") scope = { kind: "my-drive" };
     else if (kind === "drive") {
@@ -378,6 +379,9 @@ gdriveRouter.get("/api/gdrive/poll/status", (_req, res) => {
 
 const GDRIVE_EXTRACT_ID = "gdrive-extract"; // one-shot run id in the pipeline history
 const FUNNEL_CAP = 200; // no pagination UI — cap the funnel and flag truncation
+// Identifiers feed the deterministic id hash; truncating one would silently change node identity,
+// so over-length ids are rejected, not clamped. Real Drive ids are well under this.
+const MAX_ID_LEN = 200;
 
 // The funnel/extract scope arrives as the same round-trip string the poll lane uses
 // ("my-drive" | "folder:<id-or-url>" | "drive:<id>"); folder ids accept pasted URLs.
@@ -528,6 +532,9 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
     // effective-date supersession builds the revision timeline
     const logicalDocId = req.body?.logicalDocId != null ? String(req.body.logicalDocId).trim() : undefined;
     if (logicalDocId === "") return res.status(400).json({ error: "logicalDocId must be a non-empty string when present" });
+    if (logicalDocId != null && logicalDocId.length > MAX_ID_LEN) {
+      return res.status(400).json({ error: `logicalDocId must be at most ${MAX_ID_LEN} characters` });
+    }
     if (!(await sink.health())) {
       return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
     }
