@@ -5,7 +5,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { DriveFile } from "../src/gdrive-api.ts";
-import { driveFileToBatch, driveRootBatch, grantClosures, nid } from "../src/gdrive.ts";
+import { driveFileToBatch, driveRootBatch, grantClosures, hash48, nid } from "../src/gdrive.ts";
 
 test("driveRootBatch names the shared drive's root Folder node", () => {
   const items = driveRootBatch("0Aexample", "Team Drive", 1_700_000_000_000);
@@ -71,4 +71,10 @@ test("close items serialize to the engine's wire shape (object = the closed elem
 test("driveFileToBatch reports the file-time instant its facts carry (the close stamp)", () => {
   const file: DriveFile = { id: "doc-2", name: "Spec", mimeType: "application/pdf", modifiedTime: "2026-01-02T03:04:05.000Z" };
   assert.equal(driveFileToBatch(file).at, Date.parse("2026-01-02T03:04:05.000Z") / 1000);
+});
+
+test("hash48 identity is defined over the first 4096 code units", () => {
+  const base = "x".repeat(4096);
+  assert.equal(hash48(base + "tail"), hash48(base));
+  assert.notEqual(hash48("x".repeat(4095) + "a"), hash48("x".repeat(4095) + "b"));
 });
