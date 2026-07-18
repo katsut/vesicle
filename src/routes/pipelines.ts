@@ -6,6 +6,7 @@ import { Stroma } from "../stroma.ts";
 import { review, type Rule } from "../conformance.ts";
 import { recordReview, type Decision } from "../review.ts";
 import { laneMetrics, loadConfig } from "../etl/store.ts";
+import { recordDecision } from "../review-records.ts";
 import { sink } from "../runtime.ts";
 
 // Default decision-authority policy: a release must be approved by the manager of the assignee's
@@ -106,7 +107,10 @@ pipelinesRouter.post("/api/conformance", async (req, res) => {
 });
 
 // POST /api/conformance/resolve → { issue, decision, reviewer?, note? } record a human decision on a
-// gap as human-asserted facts (the flywheel's first turn).
+// gap as human-asserted facts (the flywheel's first turn). The verdict also lands a ReviewRecord:
+// the gap is re-derived from a fresh engine evaluation of the default rule so the record restates
+// what the reviewer ruled on (verdict kind, required vs actual) server-side; a subject that no
+// longer evaluates as a gap (or one reviewed under a custom rule) records the id only.
 pipelinesRouter.post("/api/conformance/resolve", async (req, res) => {
   try {
     const issue = Number(req.body?.issue);
@@ -122,6 +126,18 @@ pipelinesRouter.post("/api/conformance/resolve", async (req, res) => {
     }
     await db.ensureAuthed();
     await recordReview(db, { issue, decision: decision as Decision, reviewer, note });
+    const gap = (await review(db, DEFAULT_CONFORMANCE_RULE)).gaps.find((g) => g.subject === issue);
+    await recordDecision(sink, {
+      surface: "decision-conformance",
+      key: String(issue),
+      decision: decision as string,
+      proposal: gap ? `authority gap on ${gap.name}: ${gap.why}` : `authority gap on issue ${issue}`,
+      evidence: gap ? `${gap.verdict}${gap.kind ? `/${gap.kind}` : ""} — required ${gap.requiredName ?? "?"}, actual ${gap.actualName ?? "none"}` : undefined,
+      reviewer,
+      note,
+      at: Math.floor(Date.now() / 1000),
+      issues: [issue],
+    });
     res.json({ ok: true, issue, decision, reviewer });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });

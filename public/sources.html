@@ -904,9 +904,12 @@ function renderAcl() {
     b.onclick = async () => {
       b.disabled = true;
       try {
+        // observed/required ride along so the decision's ReviewRecord can state the tier gap
+        const row = GD.acl.report.violations.find((x) => x.node === Number(b.getAttribute("data-node")));
         await jf("/api/gdrive/access-conformance/resolve", {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ node: Number(b.getAttribute("data-node")), decision: b.getAttribute("data-acl") }),
+          body: JSON.stringify({ node: Number(b.getAttribute("data-node")), decision: b.getAttribute("data-acl"),
+            ...(row ? { observed: row.observed, required: row.required } : {}) }),
         });
         const v = GD.acl.report.violations.find((x) => x.node === Number(b.getAttribute("data-node")));
         if (v) v.review = { decision: b.getAttribute("data-acl"), reviewer: null, note: null };

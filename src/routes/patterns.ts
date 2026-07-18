@@ -6,7 +6,8 @@
 
 import express from "express";
 import { Stroma } from "../stroma.ts";
-import { PATTERN_REVIEW_ID, TRACE_EVENT_CAP, candidatesFromScan, findPatternCandidates, monthlyPoints, scanEventGroups, stabilityTrace, verdictBatch } from "../patterns.ts";
+import { PATTERN_REVIEW_ID, TRACE_EVENT_CAP, candidatesFromScan, findPatternCandidates, monthlyPoints, scanEventGroups, stabilityTrace, verdictBatch, type PatternCandidate } from "../patterns.ts";
+import { recordDecision } from "../review-records.ts";
 import { mapPool } from "../etl/pool.ts";
 import { repairLateArrivals } from "../etl/guard.ts";
 import { loadConfig, saveConfig } from "../etl/store.ts";
@@ -101,11 +102,31 @@ patternsRouter.get("/api/patterns/stability", async (req, res) => {
   }
 });
 
+/** One pattern verdict → one ReviewRecord. The candidate (when it still mines) restates the counts
+ *  and window server-side; a dismissal of a pattern that no longer mines records the id only. */
+async function recordPatternDecision(patternId: string, verdict: string, candidate: PatternCandidate | undefined): Promise<void> {
+  await recordDecision(sink, {
+    surface: "patterns",
+    key: patternId,
+    decision: verdict,
+    proposal: candidate
+      ? `${candidate.group.name ?? candidate.group.id}: ${candidate.predicate} → ${candidate.targets.map((t) => t.name ?? t.id).join(", ")} (${candidate.support}/${candidate.total})`
+      : `pattern ${patternId}`,
+    evidence: candidate
+      ? `template ${candidate.template}; window ${candidate.windowFrom}..${candidate.windowTo}; ${candidate.exceptions.length + candidate.exceptionsOmitted} exceptions`
+      : undefined,
+    at: Math.floor(Date.now() / 1000),
+    persons: candidate?.targets.map((t) => t.id),
+  });
+}
+
 // POST /api/patterns/resolve → { patternId, verdict: promote|risk|dismiss }. Promote/risk re-derive
 // the candidate from a fresh scan (the scan IS the source of truth — no derived counts are ever
 // persisted between requests) and ingest its record through sink + late-arrival repair; a stale
 // patternId that no longer mines is a 404, not a silent write. Dismiss records the id so the
-// pattern stops being proposed (no graph write).
+// pattern stops being proposed. Every verdict — dismiss included — additionally lands a
+// ReviewRecord (proposal + counts evidence + decision, provenance human-review), so a rejected
+// pattern survives as a labelled negative.
 patternsRouter.post("/api/patterns/resolve", async (req, res) => {
   try {
     const patternId = req.body?.patternId as string | undefined;
@@ -119,6 +140,15 @@ patternsRouter.post("/api/patterns/resolve", async (req, res) => {
         if (!ids.includes(patternId)) ids.push(patternId);
         cfg.dismissedPatterns = ids;
       });
+      // The config suppression must survive an offline engine; the labelled-negative record needs
+      // the engine, so it lands when reachable and is logged as skipped otherwise.
+      const db = new Stroma();
+      if (await db.health()) {
+        const candidate = (await findPatternCandidates(db)).find((c) => c.patternId === patternId);
+        await recordPatternDecision(patternId, "dismissed", candidate);
+      } else {
+        console.log(`patterns: engine offline — dismissal of ${patternId} suppressed in config only, no ReviewRecord`);
+      }
       return res.json({ ok: true, patternId, verdict });
     }
     const db = new Stroma();
@@ -131,6 +161,7 @@ patternsRouter.post("/api/patterns/resolve", async (req, res) => {
       pipelineId: PATTERN_REVIEW_ID,
     });
     logRepairs(PATTERN_REVIEW_ID, repairs);
+    await recordPatternDecision(patternId, verdict as "promote" | "risk", candidate);
     res.json({ ok: true, patternId, verdict });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });

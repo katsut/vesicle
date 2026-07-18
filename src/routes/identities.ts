@@ -1,14 +1,18 @@
 // Identity resolution routes: cross-source Person duplicates surfaced as reviewable candidates, and
 // the human verdict on each pair. Confirm writes graph facts (the same-as edge + review facts);
-// dismiss only persists the pair in the config store — a non-identity is not a fact we can assert.
+// dismiss persists the pair in the config store — a non-identity is not a fact we can assert.
 // Evidence classes whose evidence is mechanical (exact normalized email) also take ONE policy
-// verdict (/policy) that keeps auto-confirming future candidates of the class.
+// verdict (/policy) that keeps auto-confirming future candidates of the class. Every verdict —
+// confirm, dismiss, policy-driven — additionally lands a ReviewRecord (proposal + evidence +
+// decision, provenance human-review), so rejections survive as labelled negatives too.
 // Mounted behind the session auth gate (server.ts).
 
 import express from "express";
 import { Stroma } from "../stroma.ts";
-import { confirmIdentity, findCandidates, selectEmailExact, selectPolicyTargets, type Candidate } from "../identities.ts";
+import { confirmIdentity, findCandidates, selectEmailExact, selectPolicyTargets, type Candidate, type CandidatePair } from "../identities.ts";
 import { loadConfig, saveConfig } from "../etl/store.ts";
+import { recordDecision } from "../review-records.ts";
+import { sink } from "../runtime.ts";
 
 export const identitiesRouter = express.Router();
 
@@ -18,6 +22,34 @@ const pairKey = (a: number, b: number): [number, number] => (a < b ? [a, b] : [b
 /** The review note stamped on policy-driven confirms, so each pair's facts carry a reference to
  *  the policy that licensed them. */
 const EMAIL_POLICY_NOTE = "email-exact policy";
+
+const now = (): number => Math.floor(Date.now() / 1000);
+const who = (p: CandidatePair["a"]): string => p.name ?? p.email ?? String(p.id);
+const EVIDENCE_TEXT = { email: "exact normalized email match", name: "display-name token match" } as const;
+
+/** One pair verdict → one ReviewRecord. The candidate (when it still pairs) restates the proposal
+ *  and its evidence class server-side; a verdict on a pair that no longer pairs records ids only. */
+async function recordPairDecision(input: {
+  a: number;
+  b: number;
+  cand: CandidatePair | undefined;
+  decision: "confirmed" | "dismissed";
+  reviewer: string;
+  note?: string;
+}): Promise<void> {
+  const [lo, hi] = pairKey(input.a, input.b);
+  await recordDecision(sink, {
+    surface: "identities",
+    key: `${lo}-${hi}`,
+    decision: input.decision,
+    proposal: input.cand ? `same-as: ${who(input.cand.a)} = ${who(input.cand.b)}` : `same-as: ${input.a} = ${input.b}`,
+    evidence: input.cand ? EVIDENCE_TEXT[input.cand.evidence] : undefined,
+    reviewer: input.reviewer,
+    note: input.note,
+    at: now(),
+    persons: [input.a, input.b],
+  });
+}
 
 // GET /api/identities/candidates → deterministic cross-band candidate pairs with their review
 // state. Already-confirmed and dismissed pairs are marked, not hidden; unresolved pairs sort first,
@@ -41,7 +73,9 @@ identitiesRouter.get("/api/identities/candidates", async (_req, res) => {
     const candidates = (await findCandidates(db)).map((c) => ({ ...c, dismissed: isDismissed(c.a.id, c.b.id) }));
     const targets = selectPolicyTargets(policy, candidates, dismissedPairs);
     for (const c of targets) {
-      await confirmIdentity(db, { a: c.a.id, b: c.b.id, reviewer: policy?.reviewer ?? "policy", note: EMAIL_POLICY_NOTE });
+      const reviewer = policy?.reviewer ?? "policy";
+      await confirmIdentity(db, { a: c.a.id, b: c.b.id, reviewer, note: EMAIL_POLICY_NOTE });
+      await recordPairDecision({ a: c.a.id, b: c.b.id, cand: c, decision: "confirmed", reviewer, note: EMAIL_POLICY_NOTE });
       c.confirmed = true;
     }
     if (targets.length) console.log(`identities: email-exact policy auto-confirmed ${targets.length} pair(s)`);
@@ -66,6 +100,8 @@ identitiesRouter.post("/api/identities/resolve", async (req, res) => {
     if (!Number.isInteger(a) || !Number.isInteger(b) || a === b || !["confirm", "dismiss"].includes(decision ?? "")) {
       return res.status(400).json({ error: "expected { a:int, b:int, decision: confirm|dismiss, reviewer?, note? }" });
     }
+    const reviewer = (req.body?.reviewer as string | undefined) ?? "reviewer";
+    const note = req.body?.note as string | undefined;
     if (decision === "dismiss") {
       const [lo, hi] = pairKey(a, b);
       saveConfig((cfg) => {
@@ -73,15 +109,24 @@ identitiesRouter.post("/api/identities/resolve", async (req, res) => {
         if (!pairs.some(([x, y]) => x === lo && y === hi)) pairs.push([lo, hi]);
         cfg.dismissedIdentityPairs = pairs;
       });
+      // The config suppression must survive an offline engine; the labelled-negative record needs
+      // the engine, so it lands when reachable and is logged as skipped otherwise.
+      const db = new Stroma();
+      if (await db.health()) {
+        const cand = (await findCandidates(db)).find((c) => (c.a.id === a && c.b.id === b) || (c.a.id === b && c.b.id === a));
+        await recordPairDecision({ a, b, cand, decision: "dismissed", reviewer, note });
+      } else {
+        console.log(`identities: engine offline — dismissal of ${a}/${b} suppressed in config only, no ReviewRecord`);
+      }
       return res.json({ ok: true, a, b, decision });
     }
-    const reviewer = (req.body?.reviewer as string | undefined) ?? "reviewer";
-    const note = req.body?.note as string | undefined;
     const db = new Stroma();
     if (!(await db.health())) {
       return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
     }
+    const cand = (await findCandidates(db)).find((c) => (c.a.id === a && c.b.id === b) || (c.a.id === b && c.b.id === a));
     await confirmIdentity(db, { a, b, reviewer, note });
+    await recordPairDecision({ a, b, cand, decision: "confirmed", reviewer, note });
     res.json({ ok: true, a, b, decision, reviewer });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
@@ -121,6 +166,7 @@ identitiesRouter.post("/api/identities/policy", async (req, res) => {
     const targets = selectEmailExact(await findCandidates(db), dismissed);
     for (const c of targets) {
       await confirmIdentity(db, { a: c.a.id, b: c.b.id, reviewer, note: EMAIL_POLICY_NOTE });
+      await recordPairDecision({ a: c.a.id, b: c.b.id, cand: c, decision: "confirmed", reviewer, note: EMAIL_POLICY_NOTE });
     }
     res.json({ ok: true, action, confirmed: targets.length, reviewer });
   } catch (e) {
@@ -146,6 +192,7 @@ identitiesRouter.post("/api/identities/confirm-all-email", async (req, res) => {
     const targets = selectEmailExact(await findCandidates(db), dismissed);
     for (const c of targets) {
       await confirmIdentity(db, { a: c.a.id, b: c.b.id, reviewer });
+      await recordPairDecision({ a: c.a.id, b: c.b.id, cand: c, decision: "confirmed", reviewer });
     }
     res.json({ ok: true, confirmed: targets.length, reviewer });
   } catch (e) {

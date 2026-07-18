@@ -20,10 +20,11 @@ import { FOLDER_MIME, SHORTCUT_MIME, type DriveFile, type DrivePermission, type 
 // (Person 1e12 … Comment 4e12). A 48-bit hash needs a 2^48-wide band — a 1e12 stride cannot hold it —
 // so the Drive bands sit at multiples of 2^48: Document 5·2^48, Folder 6·2^48, Person 7·2^48, plus
 // the extracted-entity band 8·2^48 minted by the body lane (see gdrive-extract.ts CLAIM_BAND), the
-// body lane's DocFamily anchor band 9·2^48 (keyed by logical doc id, not a Drive id), and the
+// body lane's DocFamily anchor band 9·2^48 (keyed by logical doc id, not a Drive id), the
 // pattern-review band 10·2^48 (MinedRule / RiskNote nodes keyed by verdict-qualified pattern id —
-// src/patterns.ts). The highest id (11·2^48 < 2^52) stays far inside JS's 2^53 integers and the
-// engine's u64.
+// src/patterns.ts), and the human-decision band 11·2^48 (ReviewRecord nodes keyed by
+// surface|proposal|instant — src/review-records.ts). The highest id (12·2^48 < 2^52) stays far
+// inside JS's 2^53 integers and the engine's u64.
 //
 // Collision expectation: 2^48 values per band → the birthday bound is ~2^24 ≈ 16.7M ids per type
 // before a collision becomes likely, several orders of magnitude beyond any real drive scope.
@@ -34,6 +35,7 @@ const BAND = {
   Person: 7 * 2 ** 48,
   DocFamily: 9 * 2 ** 48,
   Pattern: 10 * 2 ** 48,
+  Review: 11 * 2 ** 48,
 } as const;
 
 const FNV_OFFSET = 0xcbf29ce484222325n;

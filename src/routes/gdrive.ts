@@ -10,6 +10,7 @@ import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, entityNamesOf, extractCl
 import { docxToText } from "../docx.ts";
 import { sheetsToText, xlsxToRows } from "../xlsx.ts";
 import { evaluateSharing, recordSharingReview, type SharingDecision } from "../access-conformance.ts";
+import { recordDecision } from "../review-records.ts";
 import { callLLM, extractJson } from "../llm.ts";
 import { Stroma } from "../stroma.ts";
 import { repairLateArrivals } from "../etl/guard.ts";
@@ -625,21 +626,39 @@ gdriveRouter.get("/api/gdrive/access-conformance", async (req, res) => {
 
 // The human verdict on a document's sharing, written back as facts (the review flywheel, Document
 // subjects). `confirmed` = the over-share is real and being fixed at the source; `waived` = the
-// sharing is intentionally broad.
+// sharing is intentionally broad. The verdict also lands a ReviewRecord (proposal + the tier gap
+// the reviewer saw + decision, provenance human-review); the optional `observed`/`required` body
+// fields carry the violation's tiers from the report row, so the record can state the gap without
+// re-running the whole scope evaluation.
 gdriveRouter.post("/api/gdrive/access-conformance/resolve", async (req, res) => {
   try {
     const node = Number(req.body?.node);
     const decision = req.body?.decision as SharingDecision | undefined;
     if (!Number.isInteger(node) || !["confirmed", "waived"].includes(decision ?? "")) {
-      return res.status(400).json({ error: "expected { node:int, decision: confirmed|waived, reviewer?, note? }" });
+      return res.status(400).json({ error: "expected { node:int, decision: confirmed|waived, reviewer?, note?, observed?, required? }" });
     }
     const reviewer = (req.body?.reviewer as string | undefined) ?? process.env.VESICLE_REVIEWER ?? "reviewer";
     const note = req.body?.note as string | undefined;
+    const observed = Number.isInteger(req.body?.observed) ? Number(req.body.observed) : null;
+    const required = Number.isInteger(req.body?.required) ? Number(req.body.required) : null;
     const db = new Stroma(loadConfig().sink.url);
     if (!(await db.health())) {
       return res.status(503).json({ error: `stroma-serve not reachable at ${process.env.STROMA_URL ?? "http://127.0.0.1:7687"}` });
     }
     await recordSharingReview(db, { node, decision: decision as SharingDecision, reviewer, note });
+    await db.ensureAuthed();
+    const name = await db.pointText(node, "doc-name");
+    await recordDecision(sink, {
+      surface: "sharing-conformance",
+      key: String(node),
+      decision: decision as string,
+      proposal: `over-sharing: document ${name ?? node}`,
+      evidence: observed != null && required != null ? `observed tier ${observed} vs required floor ${required}` : undefined,
+      reviewer,
+      note,
+      at: Math.floor(Date.now() / 1000),
+      documents: [node],
+    });
     res.json({ ok: true, node, decision, reviewer });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
