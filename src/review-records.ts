@@ -25,9 +25,8 @@ export const HUMAN_REVIEW_ID = "human-review";
 /** The ReviewRecord id band — one above the pattern-review band (see the band table in gdrive.ts). */
 export const REVIEW_BAND = 11 * 2 ** 48;
 
-/** The review surfaces that capture decisions (the wizard's proposal-vs-confirmed diff is #5's
- *  remaining slice). */
-export type ReviewSurface = "identities" | "approvals" | "patterns" | "sharing-conformance" | "decision-conformance";
+/** The review surfaces that capture decisions. */
+export type ReviewSurface = "identities" | "approvals" | "patterns" | "sharing-conformance" | "decision-conformance" | "wizard";
 
 export interface ReviewRecordInput {
   surface: ReviewSurface;
