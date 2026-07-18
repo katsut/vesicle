@@ -127,6 +127,9 @@ export interface ConnectorConfig {
   /** pattern candidates a human dismissed, by stable patternId — same rationale as the pairs above
    *  (a non-rule is not a graph fact, so it lives here) */
   dismissedPatterns?: string[];
+  /** inference candidates a human dismissed, each "doc|project" — same rationale as the keys above
+   *  (a rejected inference is not a graph fact, so it lives here) */
+  dismissedInferences?: string[];
 }
 
 /** How many runs the store keeps (append via recordRun evicts the oldest beyond this). */

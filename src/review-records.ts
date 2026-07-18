@@ -26,7 +26,7 @@ export const HUMAN_REVIEW_ID = "human-review";
 export const REVIEW_BAND = 11 * 2 ** 48;
 
 /** The review surfaces that capture decisions. */
-export type ReviewSurface = "identities" | "approvals" | "patterns" | "sharing-conformance" | "decision-conformance" | "wizard";
+export type ReviewSurface = "identities" | "approvals" | "patterns" | "sharing-conformance" | "decision-conformance" | "wizard" | "inferences";
 
 export interface ReviewRecordInput {
   surface: ReviewSurface;

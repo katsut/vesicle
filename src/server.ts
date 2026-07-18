@@ -29,6 +29,7 @@ import { approvalsRouter } from "./routes/approvals.ts";
 import { backlogRouter, backlogWebhookRouter } from "./routes/backlog.ts";
 import { gdriveRouter } from "./routes/gdrive.ts";
 import { identitiesRouter } from "./routes/identities.ts";
+import { inferencesRouter } from "./routes/inferences.ts";
 import { modelRouter } from "./routes/model.ts";
 import { patternsRouter } from "./routes/patterns.ts";
 import { pipelinesRouter } from "./routes/pipelines.ts";
@@ -110,6 +111,7 @@ app.use(pipelinesRouter); // /api/status, /api/stroma-stats, /api/sink/reset, /a
 app.use(identitiesRouter); // /api/identities/*
 app.use(approvalsRouter); // /api/approvals/*
 app.use(patternsRouter); // /api/patterns/*
+app.use(inferencesRouter); // /api/inferences/*
 app.use(backlogRouter); // /api/backlog/*
 app.use(gdriveRouter); // /api/gdrive/*
 
