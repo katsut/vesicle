@@ -814,7 +814,8 @@ async function apply() {
   $("#run").disabled = true; $("#run").innerHTML = t("applying");
   $("#result").innerHTML = "";
   try {
-    const r = await fetch("/api/apply", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ mapping: confirmedMapping(), schema: SOURCE.schema, data: SOURCE.data }) });
+    // the untouched LLM proposal rides along: the server records what the human changed before applying
+    const r = await fetch("/api/apply", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ mapping: confirmedMapping(), proposed: PROPOSAL.mapping, schema: SOURCE.schema, data: SOURCE.data }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || "apply failed");
     renderResult(j);

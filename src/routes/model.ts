@@ -15,7 +15,9 @@ import { planPayoff, runPayoff } from "../payoff.ts";
 import { checkDerivedPath, evaluateDerived } from "../deriveEval.ts";
 import { suppressedOf, type IngestStats } from "../etl/sink.ts";
 import { loadConfig, recordRun, saveConfig } from "../etl/store.ts";
-import { additionsOf, appendToModel, bindingsOf, composeMapping, conflictsOf, type ModelAdditions } from "../model.ts";
+import { additionsOf, appendToModel, bindingsOf, composeMapping, conflictsOf, mappingCorrections, type ModelAdditions } from "../model.ts";
+import { hash48 } from "../gdrive.ts";
+import { recordDecision } from "../review-records.ts";
 import type { DerivedRelation, Mapping } from "../types.ts";
 import { sink } from "../runtime.ts";
 
@@ -238,6 +240,23 @@ modelRouter.post("/api/apply", async (req, res) => {
       throw e;
     }
     recordRun({ pipelineId: "apply", kind: "one-shot", startedAt, finishedAt: Date.now(), events, facts, suppressed: suppressedOf(stats), error: null });
+
+    // The wizard sends the untouched LLM proposal alongside the mapping the human applied — the
+    // proposed-vs-confirmed delta is a review decision worth keeping (what did the human have to
+    // fix?), so it lands as a ReviewRecord. Keyed by the source schema: re-applying the same
+    // source appends a new decision instance, never supersedes.
+    const proposed = req.body?.proposed as Mapping | undefined;
+    if (proposed && req.body?.mapping) {
+      const corrections = mappingCorrections(proposed, mapping);
+      await recordDecision(sink, {
+        surface: "wizard",
+        key: `s${hash48(schema.tables.map((t) => t.name).join(",")).toString(16)}`,
+        decision: corrections.length ? "corrected" : "confirmed",
+        proposal: `ontology mapping: ${mapping.predicates.length} predicates over ${Object.keys(mapping.entity_types).length} tables`,
+        evidence: corrections.length ? corrections.join("; ") : "applied as proposed",
+        at: Math.floor(Date.now() / 1000),
+      });
+    }
 
     const out: Record<string, unknown> = { stats, gaps: tr.gaps };
 

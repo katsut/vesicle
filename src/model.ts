@@ -185,3 +185,38 @@ export function composeMapping(model: SharedModel, sm: SourceMapping): Mapping {
   if (sm.derived?.length) mapping.derived = sm.derived;
   return mapping;
 }
+
+/** What the human CHANGED between the LLM-proposed mapping and the one they applied — compact,
+ *  human-readable correction lines for the wizard's ReviewRecord. Empty = applied as proposed.
+ *  Compared per predicate name and per source table; the wizard UI can only retarget tables, drop
+ *  predicates, flip cardinality, and drop edge-properties / valid-time, but the diff stays general
+ *  so an edited JSON body reports honestly too. */
+export function mappingCorrections(proposed: Mapping, confirmed: Mapping): string[] {
+  const out: string[] = [];
+  for (const [table, type] of Object.entries(proposed.entity_types)) {
+    const now = confirmed.entity_types[table];
+    if (now == null) out.push(`table ${table} (${type}) dropped`);
+    else if (now !== type) out.push(`table ${table}: ${type} -> ${now}`);
+  }
+  for (const table of Object.keys(confirmed.entity_types)) {
+    if (!(table in proposed.entity_types)) out.push(`table ${table} added (${confirmed.entity_types[table]})`);
+  }
+  const before = new Map(proposed.predicates.map((p) => [p.name, p]));
+  const after = new Map(confirmed.predicates.map((p) => [p.name, p]));
+  for (const [name, p] of before) {
+    const c = after.get(name);
+    if (!c) {
+      out.push(`${name} dropped`);
+      continue;
+    }
+    if (c.from !== p.from || c.to !== p.to) out.push(`${name}: ${p.from}->${p.to} retargeted to ${c.from}->${c.to}`);
+    if (c.cardinality !== p.cardinality) out.push(`${name}: cardinality ${p.cardinality} -> ${c.cardinality}`);
+    const dropped = (p.properties ?? []).filter((col) => !(c.properties ?? []).includes(col));
+    if (dropped.length) out.push(`${name}: edge properties dropped (${dropped.join(", ")})`);
+    if (p.valid_end && !c.valid_end) out.push(`${name}: valid-time (${p.valid_end}) dropped`);
+  }
+  for (const name of after.keys()) {
+    if (!before.has(name)) out.push(`${name} added`);
+  }
+  return out;
+}
