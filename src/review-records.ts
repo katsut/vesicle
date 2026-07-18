@@ -64,10 +64,19 @@ const SCHEMA: BatchItem[] = [
   { pred_def: { name: "review-of-document", cardinality: "many", domain: "ReviewRecord", range: "Document" } },
 ];
 
+// A record is a compact line, not a dumping ground: request-supplied strings (reviewer, note, and
+// through some surfaces the key) are clamped before they reach the hash loop or land as facts —
+// which also bounds the id hash's iteration over user-controlled input explicitly, not just via
+// the body-size limit.
+const KEY_MAX = 200;
+const NAME_MAX = 120;
+const LINE_MAX = 500;
+const clamp = (s: string, max: number): string => (s.length > max ? s.slice(0, max) : s);
+
 /** Deterministic record id: the decision INSTANCE, not the proposal — the same proposal re-reviewed
  *  later (or by another reviewer) mints a distinct record, so the log never supersedes itself. */
 export const reviewRecordId = (surface: ReviewSurface, key: string, at: number, reviewer?: string): number =>
-  REVIEW_BAND + hash48(`${surface}|${key}|${at}|${reviewer ?? ""}`);
+  REVIEW_BAND + hash48(`${surface}|${clamp(key, KEY_MAX)}|${at}|${clamp(reviewer ?? "", NAME_MAX)}`);
 
 /** One decision → a self-contained ingest batch (schema + the record node + its facts). All facts
  *  carry valid_from = the decision instant and no source — the sink stamps HUMAN_REVIEW_ID. */
@@ -78,11 +87,11 @@ export function reviewRecordBatch(r: ReviewRecordInput): BatchItem[] {
     items.push({ fact: { subject: id, predicate, object: { text }, valid_from: r.at } });
   };
   fact("review-surface", r.surface);
-  fact("review-decision", r.decision);
-  fact("review-proposal", r.proposal);
-  if (r.evidence) fact("review-evidence", r.evidence);
-  if (r.reviewer) fact("review-reviewer", r.reviewer);
-  if (r.note) fact("review-note", r.note);
+  fact("review-decision", clamp(r.decision, NAME_MAX));
+  fact("review-proposal", clamp(r.proposal, LINE_MAX));
+  if (r.evidence) fact("review-evidence", clamp(r.evidence, LINE_MAX));
+  if (r.reviewer) fact("review-reviewer", clamp(r.reviewer, NAME_MAX));
+  if (r.note) fact("review-note", clamp(r.note, LINE_MAX));
   const point = (predicate: string, nodes: readonly number[] | undefined): void => {
     for (const node of nodes ?? []) {
       items.push({ fact: { subject: id, predicate, object: { node }, valid_from: r.at } });
