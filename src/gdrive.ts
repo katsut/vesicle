@@ -44,10 +44,13 @@ const U64 = 0xffffffffffffffffn;
 const MASK48 = (1n << 48n) - 1n;
 
 /** FNV-1a 64 over the UTF-16 code units, truncated to 48 bits. Shared with the body lane's
- *  extracted-entity ids (gdrive-extract.ts), so every Drive-derived id hashes the same way. */
+ *  extracted-entity ids (gdrive-extract.ts), so every Drive-derived id hashes the same way.
+ *  Identity is defined over the first 4096 code units — every legitimate id/name is orders of
+ *  magnitude shorter, and the bound keeps untrusted remote strings from driving the loop. */
 export function hash48(s: string): number {
+  const n = Math.min(s.length, 4096);
   let h = FNV_OFFSET;
-  for (let i = 0; i < s.length; i++) {
+  for (let i = 0; i < n; i++) {
     h ^= BigInt(s.charCodeAt(i));
     h = (h * FNV_PRIME) & U64;
   }
