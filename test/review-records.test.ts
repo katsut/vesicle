@@ -62,3 +62,33 @@ test("reviewRecordBatch: absent optionals write no facts — a dismissal without
   const preds = items.filter((i) => "fact" in i).map((i) => (i as { fact: { predicate: string } }).fact.predicate);
   assert.deepEqual(preds.sort(), ["review-decision", "review-proposal", "review-surface"]);
 });
+
+test("request-supplied strings are clamped — bounded hash input, line-sized facts", () => {
+  // ids agree once the over-cap tail differs: the hash never iterates past the clamp
+  const longKey = "k".repeat(1000);
+  assert.equal(
+    reviewRecordId("identities", longKey + "AAA", 1, "r"),
+    reviewRecordId("identities", longKey + "BBB", 1, "r"),
+  );
+  // fact values are cut to their caps (proposal/evidence/note ≤ 500, reviewer ≤ 120)
+  const items = reviewRecordBatch({
+    surface: "patterns",
+    key: "p1",
+    decision: "dismissed",
+    proposal: "p".repeat(2000),
+    evidence: "e".repeat(2000),
+    reviewer: "r".repeat(2000),
+    note: "n".repeat(2000),
+    at: 1,
+  });
+  const byPred = new Map(
+    items.filter((i) => "fact" in i).map((i) => {
+      const f = (i as { fact: { predicate: string; object: { text?: string } } }).fact;
+      return [f.predicate, f.object.text?.length];
+    }),
+  );
+  assert.equal(byPred.get("review-proposal"), 500);
+  assert.equal(byPred.get("review-evidence"), 500);
+  assert.equal(byPred.get("review-note"), 500);
+  assert.equal(byPred.get("review-reviewer"), 120);
+});

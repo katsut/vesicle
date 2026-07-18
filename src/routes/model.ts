@@ -250,7 +250,8 @@ modelRouter.post("/api/apply", async (req, res) => {
       const corrections = mappingCorrections(proposed, mapping);
       await recordDecision(sink, {
         surface: "wizard",
-        key: `s${hash48(schema.tables.map((t) => t.name).join(",")).toString(16)}`,
+        // table names come from the request's schema DDL — clamp before the hash loop
+        key: `s${hash48(schema.tables.map((t) => t.name).join(",").slice(0, 512)).toString(16)}`,
         decision: corrections.length ? "corrected" : "confirmed",
         proposal: `ontology mapping: ${mapping.predicates.length} predicates over ${Object.keys(mapping.entity_types).length} tables`,
         evidence: corrections.length ? corrections.join("; ") : "applied as proposed",
