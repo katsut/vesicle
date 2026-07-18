@@ -150,6 +150,7 @@
   <div id="identities"></div>
   <div id="approvals"></div>
   <div id="patterns"></div>
+  <div id="inferences"></div>
 </div>
 
 <script type="module">
@@ -216,6 +217,15 @@ const I18N = {
     pat_stab_sampled: "(sampled)",
     pat_empty: "no candidates",
     pat_offline: "StromaDB is not reachable — candidate generation needs the engine.",
+    inf_head: "Inferences",
+    inf_tagline: "Implicit values proposed from the graph neighborhood — deterministic, supporting facts cited, no LLM. Unanimous neighborhoods are auto-filled (evaluated per request, never stored); majorities wait for a verdict. Confirm writes one relates-to-project fact; Dismiss only stops the proposal.",
+    inf_filled_head: "auto-filled (evaluated)",
+    inf_support: "{k}/{n} grantees",
+    inf_via: "via {name}",
+    inf_confirm: "Confirm", inf_dismiss: "Dismiss",
+    inf_confirmed: "confirmed", inf_dismissed: "dismissed",
+    inf_empty: "no inferences",
+    inf_offline: "StromaDB is not reachable — inference needs the engine.",
   },
   ja: {
     nav_sources: "ソース", nav_sink: "シンク", nav_pipelines: "パイプライン", nav_model: "モデル",
@@ -275,6 +285,15 @@ const I18N = {
     pat_stab_sampled: "（サンプリング）",
     pat_empty: "候補はありません",
     pat_offline: "StromaDB に接続できません — 候補の生成にはエンジンが必要です。",
+    inf_head: "推論",
+    inf_tagline: "グラフ近傍から提案される暗黙の値 — 決定論的で根拠ファクトを引用、LLM は使いません。全員一致の近傍は自動充足（リクエストごとに評価、保存しない）、過半数は人の裁定待ち。「確認」は relates-to-project ファクトを 1 件書き込み、「却下」は提案を止めるだけです。",
+    inf_filled_head: "自動充足（評価値）",
+    inf_support: "{k}/{n} 人の閲覧者",
+    inf_via: "{name} として",
+    inf_confirm: "確認", inf_dismiss: "却下",
+    inf_confirmed: "確認済み", inf_dismissed: "却下済み",
+    inf_empty: "推論はありません",
+    inf_offline: "StromaDB に接続できません — 推論にはエンジンが必要です。",
   },
   zh: {
     nav_sources: "数据源", nav_sink: "数据汇", nav_pipelines: "管道", nav_model: "模型",
@@ -334,6 +353,15 @@ const I18N = {
     pat_stab_sampled: "（抽样）",
     pat_empty: "没有候选",
     pat_offline: "无法连接 StromaDB — 生成候选需要引擎。",
+    inf_head: "推断",
+    inf_tagline: "从图邻域提出的隐含值 — 确定性、引用支持事实、不使用 LLM。一致的邻域自动填充（每次请求评估，不存储）；多数派等待人工裁定。「确认」写入一条 relates-to-project 事实，「忽略」只是停止提议。",
+    inf_filled_head: "自动填充（评估值）",
+    inf_support: "{k}/{n} 位访问者",
+    inf_via: "作为 {name}",
+    inf_confirm: "确认", inf_dismiss: "忽略",
+    inf_confirmed: "已确认", inf_dismissed: "已忽略",
+    inf_empty: "没有推断",
+    inf_offline: "无法连接 StromaDB — 推断需要引擎。",
   },
 };
 let LANG = "en";
@@ -850,6 +878,87 @@ $("#patterns").addEventListener("click", async (ev) => {
   await loadPatterns();
 });
 
+// --- Inferences: deterministic doc→project affinities from grant neighborhoods
+// (GET /api/inferences/candidates). Unanimous rows render as auto-filled evaluated values (no
+// verdict to take — they re-answer as the graph changes); ambiguous majorities take
+// confirm/dismiss, POSTed to /api/inferences/resolve, then reload.
+let INFS = { kind: "loading" };
+
+function infRow(r, filled) {
+  const cite = r.supporters.map((s) => {
+    const g = esc(String(s.grantee.name ?? s.grantee.id));
+    return s.via ? `${g} <span class="snip">${esc(t("inf_via", { name: String(s.via.name ?? s.via.id) }))}</span>` : g;
+  }).join(", ");
+  const state = r.confirmed
+    ? `<span class="idstate ok">${esc(t("inf_confirmed"))}</span>`
+    : r.dismissed
+      ? `<span class="idstate">${esc(t("inf_dismissed"))}</span>`
+      : "";
+  const buttons = filled || r.confirmed || r.dismissed
+    ? ""
+    : `<button class="rowbtn" data-inf="confirm" data-doc="${r.doc.id}" data-project="${r.project.id}">${esc(t("inf_confirm"))}</button>
+       <button class="rowbtn ghost" data-inf="dismiss" data-doc="${r.doc.id}" data-project="${r.project.id}">${esc(t("inf_dismiss"))}</button>`;
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+      <b>${esc(String(r.doc.name ?? r.doc.id))}</b>
+      <span class="maprow"><b>relates-to-project</b></span>
+      <span class="etype">${esc(String(r.project.name ?? r.project.id))}</span>
+      <span class="cardin strong">${esc(t("inf_support", { k: r.support, n: r.resolvable }))}</span>
+      ${filled ? `<span class="cardin">${esc(t("inf_filled_head"))}</span>` : ""}
+      ${state}
+    </div>
+    <div class="snip" style="margin-top:8px">${cite}</div>
+    ${buttons ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">${buttons}</div>` : ""}
+  </div>`;
+}
+
+function renderInferences() {
+  const el = $("#inferences"); if (!el) return;
+  const head = `<div class="streamhead"><h2>${t("inf_head")}</h2><div class="bar"></div></div>
+    <p class="tagline" style="margin:0 0 12px">${esc(t("inf_tagline"))}</p>`;
+  if (INFS.kind === "loading") { el.innerHTML = head + `<div class="loading">${t("loading")}</div>`; return; }
+  if (INFS.kind === "offline") { el.innerHTML = head + `<div class="empty">${esc(t("inf_offline"))}</div>`; return; }
+  if (INFS.kind === "unauthorized") { el.innerHTML = head + `<div class="err">${t("err_unauthorized")}</div>`; return; }
+  if (INFS.kind === "error") { el.innerHTML = head + `<div class="err">${esc(t("err_request", { e: INFS.message }))}</div>`; return; }
+  const rows = [...INFS.filled.map((r) => infRow(r, true)), ...INFS.candidates.map((r) => infRow(r, false))];
+  el.innerHTML = head + (rows.length ? rows.join("") : `<div class="empty">${esc(t("inf_empty"))}</div>`);
+}
+
+async function loadInferences() {
+  try {
+    const r = await fetch("/api/inferences/candidates");
+    if (r.status === 503) { INFS = { kind: "offline" }; renderInferences(); return; }
+    if (r.status === 401) { INFS = { kind: "unauthorized" }; renderInferences(); return; }
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j) { INFS = { kind: "error", message: (j && j.error) || `HTTP ${r.status}` }; renderInferences(); return; }
+    INFS = { kind: "data", filled: Array.isArray(j.filled) ? j.filled : [], candidates: Array.isArray(j.candidates) ? j.candidates : [] };
+  } catch (e) {
+    INFS = { kind: "error", message: e.message };
+  }
+  renderInferences();
+}
+
+$("#inferences").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-inf]");
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/inferences/resolve", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ doc: Number(btn.dataset.doc), project: Number(btn.dataset.project), decision: btn.dataset.inf }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => null);
+      throw new Error((j && j.error) || `HTTP ${r.status}`);
+    }
+  } catch (e) {
+    INFS = { kind: "error", message: e.message };
+    renderInferences();
+    return;
+  }
+  await loadInferences();
+});
+
 async function load() {
   try {
     const r = await fetch("/api/model");
@@ -872,6 +981,7 @@ load();
 loadIdentities();
 loadApprovals();
 loadPatterns();
+loadInferences();
 </script>
 </body>
 </html>
