@@ -7,6 +7,7 @@ import { authorizeUrl as gdriveAuthorizeUrl, exchangeCode as gdriveExchangeCode,
 import { DOC_MIME, PDF_MIME, SLIDES_MIME, WORD_MIME, XLSX_MIME, downloadFile, exportDoc, exportPdf, getDrive, getFile, getStartPageToken, hydrateFile, listChanges, listDrives, listFiles, parseFolderId, type DriveScope, type DriveFile, type GdriveApiConfig } from "../gdrive-api.ts";
 import { driveFileToBatch, driveRootBatch, grantClosures, nid, sensitivityLabel } from "../gdrive.ts";
 import { DEFAULT_PATTERN, classifyFiles, claimsToBatch, entityNamesOf, extractClaims, parseKnownEntities, readFamilyEntityKeys, type DocContent, type DocPattern } from "../gdrive-extract.ts";
+import { casPut, digestOf } from "../cas.ts";
 import { docxToText } from "../docx.ts";
 import { sheetsToText, xlsxToRows } from "../xlsx.ts";
 import { evaluateSharing, recordSharingReview, type SharingDecision } from "../access-conformance.ts";
@@ -568,6 +569,10 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
         else if (mime === WORD_MIME) doc = { kind: "text", text: docxToText(Buffer.from((await downloadFile(cfg, file.id)).base64, "base64")) };
         else if (mime === XLSX_MIME) doc = { kind: "text", text: sheetsToText(xlsxToRows(Buffer.from((await downloadFile(cfg, file.id)).base64, "base64"))) };
         else throw new Error(`unsupported mimeType ${mime || "(none)"} — only PDF, Google Docs, Slides, Word (.docx) and Excel (.xlsx) are readable`);
+        // The document leg of claim provenance: digest the EXACT content handed to the extractor.
+        // Text lanes also land in the CAS (re-extraction reads it back without another Drive
+        // trip); a PDF's bytes stay in the source — the digest alone pins which content it was.
+        const contentDigest = doc.kind === "text" ? casPut(doc.text) : digestOf(Buffer.from(doc.base64, "base64"));
         const claims = await extractClaims(pattern, doc, logicalDocId ? knownEntities : undefined);
         if (logicalDocId) entityNamesOf(claims, knownEntities);
         const batch = claimsToBatch({
@@ -575,6 +580,7 @@ gdriveRouter.post("/api/gdrive/extract", async (req, res) => {
           logicalDocId,
           docLabel: sensitivityLabel(file.permissions),
           modifiedTime: file.modifiedTime,
+          contentDigest,
           pattern,
           claims,
           model,
