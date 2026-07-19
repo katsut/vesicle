@@ -13,7 +13,11 @@
 //                        .xlsx workbooks per-sheet TSV text locally (xlsx.ts).
 //   3. claimsToBatch   — deterministic mapping to a self-contained ingest batch: pattern defs +
 //                        entity nodes in the extracted-entity band + facts with explicit
-//                        `drive:<fileId>` provenance on every fact.
+//                        `drive:<fileId>` provenance on every fact. Claim provenance is three-
+//                        legged: each fact carries its verbatim `passage` and stated-vs-implied
+//                        `confidence` as edge properties, and the Document node records the
+//                        `content-digest` of the exact content extracted (the CAS keeps the text
+//                        for re-extraction — src/cas.ts).
 //
 // Node ids: extracted entities are named in prose, not keyed by a Drive id, so they mint in their
 // own band — 8·2^48, one above gdrive.ts's Document/Folder/Person bands (see the band table there)
@@ -109,7 +113,9 @@ export function classifyFiles(files: DriveFile[]): { files: FunnelFile[]; skippe
 export type DocContent = { kind: "text"; text: string } | { kind: "pdf"; base64: string };
 
 /** One extracted claim — a typed fact candidate, pre-resolution. `effectiveFrom` is the ISO date the
- *  document states the claim takes effect (only when the pattern declares a date field). */
+ *  document states the claim takes effect (only when the pattern declares a date field). `passage`
+ *  is the verbatim source text that states the claim (the re-grounding leg of the provenance
+ *  chain), `confidence` whether the document states it explicitly or the model inferred it. */
 export interface DocClaim {
   subject: string;
   subjectType: string;
@@ -117,7 +123,13 @@ export interface DocClaim {
   object: string;
   objectType?: string;
   effectiveFrom?: string;
+  passage?: string;
+  confidence?: "explicit" | "implied";
 }
+
+/** Passages ride each claim fact as an edge property — a quote, not the document (the CAS holds
+ *  the full text for re-extraction), so they are cut to a quote-sized cap. */
+export const PASSAGE_CAP = 1000;
 
 function patternForPrompt(p: DocPattern): string {
   const preds = p.predicates
@@ -131,7 +143,9 @@ or similar rule document). You are given a fixed list of entity types and relati
 extraction pattern). Extract ONLY facts that match one of the listed relationships. Use the exact
 names/identifiers as written in the document for entities (a rule number, a section heading). Do not
 invent facts that are not supported by the document. If the document says nothing about a
-relationship, omit it.`;
+relationship, omit it. For EVERY fact, quote the passage — the exact sentence(s) from the document
+that state it, verbatim — and say whether the fact is stated explicitly ("explicit") or only
+follows from the wording ("implied").`;
 
 function outputSpec(dateField: string | undefined): string {
   const eff = dateField
@@ -142,7 +156,9 @@ function outputSpec(dateField: string | undefined): string {
   "facts": [
     { "subject": "<entity name>", "subjectType": "<one of the entity types>",
       "predicate": "<one of the relationship names>",
-      "object": "<entity name or value>", "objectType": "<entity type, omit for a value>"${eff} }
+      "object": "<entity name or value>", "objectType": "<entity type, omit for a value>",
+      "passage": "<the verbatim sentence(s) that state this fact>",
+      "confidence": "<explicit | implied>"${eff} }
   ]
 }`;
 }
@@ -189,6 +205,10 @@ export function parseClaims(text: string, pattern: DocPattern): DocClaim[] {
       claim.objectType = typeof f.objectType === "string" && f.objectType ? f.objectType : decl.to;
     }
     if (typeof f.effectiveFrom === "string" && f.effectiveFrom.trim()) claim.effectiveFrom = f.effectiveFrom.trim();
+    // provenance legs: a quote-sized passage (the CAS keeps the full text), and the stated-vs-
+    // implied confidence — anything outside the two-value vocabulary is dropped, not guessed
+    if (typeof f.passage === "string" && f.passage.trim()) claim.passage = f.passage.trim().slice(0, PASSAGE_CAP);
+    if (f.confidence === "explicit" || f.confidence === "implied") claim.confidence = f.confidence;
     out.push(claim);
   }
   return out;
@@ -253,6 +273,9 @@ export function claimsToBatch(input: {
   docLabel: number;
   /** the valid_from fallback for claims without an effective date */
   modifiedTime?: string;
+  /** sha256 of the exact content the extractor saw (src/cas.ts digestOf) — recorded on the
+   *  Document node so the claims' audit chain pins WHICH content produced them */
+  contentDigest?: string;
   pattern: DocPattern;
   claims: DocClaim[];
   model: SharedModel;
@@ -324,7 +347,21 @@ export function claimsToBatch(input: {
       object = { text: c.object };
     }
     const eff = c.effectiveFrom ? isoToEpoch(c.effectiveFrom) : 0;
-    facts.push({ fact: { subject, predicate: c.predicate, object, valid_from: eff > 0 ? eff : docEpoch, source } });
+    // the claim's own provenance legs ride the fact's edge properties: the verbatim passage (for
+    // re-grounding) and the stated-vs-implied extraction confidence
+    const props: Record<string, string> = {};
+    if (c.passage) props.passage = c.passage;
+    if (c.confidence) props.confidence = c.confidence;
+    facts.push({
+      fact: {
+        subject,
+        predicate: c.predicate,
+        object,
+        ...(Object.keys(props).length ? { props } : {}),
+        valid_from: eff > 0 ? eff : docEpoch,
+        source,
+      },
+    });
     if (floor > maxFloor) maxFloor = floor;
   }
 
@@ -368,6 +405,22 @@ export function claimsToBatch(input: {
         subject: nid("Document", fileId),
         predicate: "requires-floor",
         object: { int: requiresFloor },
+        valid_from: docEpoch,
+        source,
+      },
+    });
+  }
+
+  // The document leg of the provenance chain: WHICH exact content produced these claims. Stamped
+  // at the document's modifiedTime, so a revision supersedes the digest in step with the document
+  // itself; the CAS (src/cas.ts) holds the text under this digest for re-extraction.
+  if (input.contentDigest) {
+    defs.push({ pred_def: { name: "content-digest", cardinality: "one", domain: "Document", range_value: "text" } });
+    facts.push({
+      fact: {
+        subject: nid("Document", fileId),
+        predicate: "content-digest",
+        object: { text: input.contentDigest },
         valid_from: docEpoch,
         source,
       },

@@ -12,6 +12,7 @@ import { nid } from "../src/gdrive.ts";
 import {
   CLAIM_BAND,
   DEFAULT_PATTERN,
+  PASSAGE_CAP,
   buildDocPrompt,
   claimNid,
   entityNamesOf,
@@ -250,6 +251,50 @@ test("parseClaims: drops out-of-pattern facts, defaults types, keeps effectiveFr
   assert.equal(claims[0]!.effectiveFrom, "2024-04-01");
   assert.equal(claims[0]!.objectType, undefined); // value predicate
   assert.equal(claims[1]!.objectType, "Section"); // edge predicate → defaulted from the range
+});
+
+test("parseClaims: passage is trimmed and capped, confidence keeps its two-value vocabulary", () => {
+  const long = "p".repeat(2000);
+  const text = `{ "facts": [
+    { "subject": "Rule 1", "predicate": "rule-text", "object": "Text", "passage": "  Rule 1 applies.  ", "confidence": "explicit" },
+    { "subject": "Rule 2", "predicate": "rule-text", "object": "Text", "passage": "${long}", "confidence": "implied" },
+    { "subject": "Rule 3", "predicate": "rule-text", "object": "Text", "passage": "   ", "confidence": "certain" }
+  ] }`;
+  const claims = parseClaims(text, PATTERN);
+  assert.equal(claims[0]!.passage, "Rule 1 applies.");
+  assert.equal(claims[0]!.confidence, "explicit");
+  assert.equal(claims[1]!.passage!.length, PASSAGE_CAP); // a quote, not the document
+  assert.equal(claims[1]!.confidence, "implied");
+  assert.equal(claims[2]!.passage, undefined); // blank → absent
+  assert.equal(claims[2]!.confidence, undefined); // outside the vocabulary → dropped, not guessed
+});
+
+test("claimsToBatch: passage and confidence ride the claim fact as edge properties", () => {
+  const claims: DocClaim[] = [
+    { subject: "Rule 1", subjectType: "Rule", predicate: "rule-text", object: "Text", passage: "Rule 1 applies.", confidence: "explicit" },
+    { subject: "Rule 2", subjectType: "Rule", predicate: "rule-text", object: "Other" }, // no legs → no props
+  ];
+  const { items } = claimsToBatch({ fileId: FILE_ID, docLabel: 0, pattern: PATTERN, claims, model: modelWithFloors({}) });
+  const [withLegs, without] = factsOf(items).filter((f) => f.predicate === "rule-text");
+  assert.deepEqual(withLegs!.props, { passage: "Rule 1 applies.", confidence: "explicit" });
+  assert.equal(without!.props, undefined);
+});
+
+test("claimsToBatch: contentDigest lands as a content-digest fact on the Document node", () => {
+  const digest = "d".repeat(64);
+  const claims: DocClaim[] = [{ subject: "Rule 1", subjectType: "Rule", predicate: "rule-text", object: "Text" }];
+  const common = { docLabel: 0, pattern: PATTERN, claims, model: modelWithFloors({}), modifiedTime: "2026-01-01T00:00:00Z" };
+  const { items } = claimsToBatch({ fileId: FILE_ID, contentDigest: digest, ...common });
+  const fact = factsOf(items).find((f) => f.predicate === "content-digest");
+  assert.ok(fact, "content-digest fact present");
+  assert.equal(fact!.subject, nid("Document", FILE_ID));
+  assert.deepEqual(fact!.object, { text: digest });
+  assert.equal(fact!.valid_from, Date.parse("2026-01-01T00:00:00Z") / 1000); // supersedes with the document
+  assert.equal(fact!.source, `drive:${FILE_ID}`);
+  // and without a digest neither the def nor the fact appears
+  const bare = claimsToBatch({ fileId: FILE_ID, ...common });
+  assert.ok(!factsOf(bare.items).some((f) => f.predicate === "content-digest"));
+  assert.ok(!bare.items.some((i) => "pred_def" in i && i.pred_def.name === "content-digest"));
 });
 
 test("buildDocPrompt: PDF references the attachment, text embeds the document, date field instructed", () => {

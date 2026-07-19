@@ -136,7 +136,9 @@ export interface ConnectorConfig {
 export const RUNS_CAP = 50;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VAR_DIR = process.env.VESICLE_VAR_DIR ?? resolve(HERE, "../../var"); // override for tests/deploys
+/** The runtime-state directory (git-ignored). Exported for the sibling stores that live next to
+ *  config.json (the passage CAS). */
+export const VAR_DIR = process.env.VESICLE_VAR_DIR ?? resolve(HERE, "../../var"); // override for tests/deploys
 const FILE = resolve(VAR_DIR, "config.json");
 
 let cache: ConnectorConfig | null = null;
