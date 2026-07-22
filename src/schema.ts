@@ -90,10 +90,17 @@ function parseTable(name: string, body: string): Table {
 export function parseSchema(sql: string): SchemaModel {
   const clean = stripComments(sql);
   const tables: Table[] = [];
-  const re = /CREATE TABLE\s+(\w+)\s*\(([\s\S]*?)\)\s*;/gi;
+  // Header and terminator matched separately: a single lazy [\s\S]*? body scan re-runs from every
+  // header on unterminated input (polynomial on user-provided DDL); two anchored passes stay linear.
+  const head = /CREATE TABLE\s+(\w+)\s*\(/gi;
+  const tail = /\)\s*;/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(clean))) {
-    tables.push(parseTable(m[1]!, m[2]!));
+  while ((m = head.exec(clean))) {
+    tail.lastIndex = head.lastIndex;
+    const t = tail.exec(clean);
+    if (!t) break;
+    tables.push(parseTable(m[1]!, clean.slice(head.lastIndex, t.index)));
+    head.lastIndex = tail.lastIndex;
   }
   return { tables };
 }

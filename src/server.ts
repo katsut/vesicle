@@ -21,6 +21,7 @@
 
 import "./env.ts"; // load ./.env before anything reads process.env
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -77,6 +78,10 @@ button{width:100%;font:inherit;font-weight:600;color:#fff;background:var(--accen
 }
 
 const app = express();
+// Local single-operator service, so rate limiting is defense-in-depth: a generous global ceiling,
+// plus a tight budget on /login where a guessing loop is the realistic abuse.
+app.use(rateLimit({ windowMs: 60_000, limit: 1_000, standardHeaders: true, legacyHeaders: false }));
+app.use("/login", rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false }));
 app.use(express.json({ limit: "4mb" }));
 app.use(express.urlencoded({ extended: false })); // login form POST
 

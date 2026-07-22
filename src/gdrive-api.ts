@@ -113,7 +113,7 @@ export async function listFiles(
     fields: `nextPageToken,files(${FILE_FIELDS})`,
   });
   if (opts.scope.kind === "folder") {
-    p.set("q", `'${opts.scope.id.replace(/'/g, "\\'")}' in parents and trashed=false`);
+    p.set("q", `'${opts.scope.id.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}' in parents and trashed=false`);
     // a folder may live on a shared drive — include both corpora
     p.set("includeItemsFromAllDrives", "true");
     p.set("supportsAllDrives", "true");
