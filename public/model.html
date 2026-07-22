@@ -371,7 +371,12 @@ function t(k, v) {
   return s;
 }
 function applyLang() {
-  document.querySelectorAll("[data-i18n]").forEach((e) => { e.innerHTML = t(e.getAttribute("data-i18n")); });
+  // innerHTML only ever receives authored I18N literals; an unknown key lands inert via textContent
+  document.querySelectorAll("[data-i18n]").forEach((e) => {
+    const k = e.getAttribute("data-i18n");
+    const s = (I18N[LANG] && I18N[LANG][k]) || I18N.en[k];
+    if (typeof s === "string") e.innerHTML = s; else e.textContent = k;
+  });
   document.querySelectorAll("[data-i18n-title]").forEach((e) => { e.title = t(e.getAttribute("data-i18n-title")); });
   render();
   renderIdentities();
